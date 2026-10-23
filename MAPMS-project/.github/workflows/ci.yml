@@ -1,0 +1,94 @@
+name: MAPMS CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-and-lint:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: mapms
+          POSTGRES_USER: mapms
+          POSTGRES_PASSWORD: mapms_dev_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mapms -d mapms"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install project and development dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+      - name: Enable PostgreSQL extensions
+        env:
+          PGPASSWORD: mapms_dev_password
+        run: |
+          psql -v ON_ERROR_STOP=1 -h localhost -U mapms -d mapms \
+            -f db/init/001-extensions.sql
+
+      - name: Run tests
+        env:
+          PGPASSWORD: mapms_dev_password
+        run: python -m pytest -v
+
+      - name: Verify architecture linter rejects forbidden imports
+        shell: bash
+        run: |
+          set -euo pipefail
+          canary="mapms/supervisor/_lint_canary.py"
+          trap 'rm -f "$canary"' EXIT
+
+          printf 'import mapms.projects\n' > "$canary"
+
+          set +e
+          output="$(lint-imports --no-cache 2>&1)"
+          status=$?
+          set -e
+
+          printf '%s\n' "$output"
+
+          if [ "$status" -eq 0 ]; then
+            echo "ERROR: Linter accepted a forbidden import."
+            exit 1
+          fi
+
+          if ! printf '%s\n' "$output" | grep -Fq \
+            'mapms.supervisor._lint_canary -> mapms.projects'; then
+            echo "ERROR: Linter failed for an unexpected reason."
+            exit 1
+          fi
+
+          rm -f "$canary"
+          trap - EXIT
+
+          lint-imports --no-cache
+
+      - name: Check architecture boundaries
+        run: lint-imports --no-cache
+
+      - name: Check Alembic configuration
+        run: |
+          python -m alembic history
+          python -m alembic heads

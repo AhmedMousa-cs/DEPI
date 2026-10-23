@@ -1,0 +1,10 @@
+[importlinter]
+root_package = mapms
+
+[importlinter:contract:supervisor_boundary]
+name = Supervisor must not import project internals
+type = forbidden
+source_modules =
+    mapms.supervisor
+forbidden_modules =
+    mapms.projects

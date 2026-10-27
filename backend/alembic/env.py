@@ -4,6 +4,8 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from app.config import settings
+from app.db import models  # noqa: F401  (registers all tables on Base.metadata)
+from app.db.base import Base
 
 config = context.config
 if config.config_file_name is not None:
@@ -12,8 +14,7 @@ if config.config_file_name is not None:
 # the URL comes from the environment, never from alembic.ini
 config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
-# set to Base.metadata once the models exist (M1)
-target_metadata = None
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:

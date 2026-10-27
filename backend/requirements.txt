@@ -4,3 +4,8 @@ sqlalchemy>=2
 alembic
 psycopg[binary]
 pydantic-settings
+email-validator
+pyjwt
+argon2-cffi
+pytest
+httpx

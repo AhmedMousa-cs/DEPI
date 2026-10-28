@@ -10,6 +10,8 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://nexus:change-me@localhost:5432/nexus"
     jwt_secret: str = "change-me"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 60
 
 
 settings = Settings()

@@ -9,3 +9,6 @@ pyjwt
 argon2-cffi
 pytest
 httpx
+python-multipart
+python-docx
+pypdf

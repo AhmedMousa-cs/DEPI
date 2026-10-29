@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
+    max_upload_bytes: int = 5 * 1024 * 1024  # blueprint: 5 MB
 
 
 settings = Settings()

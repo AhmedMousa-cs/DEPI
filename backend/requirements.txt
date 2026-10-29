@@ -7,5 +7,9 @@ pydantic-settings
 email-validator
 pyjwt
 argon2-cffi
+passlib[argon2]>=1.7.4
 pytest
 httpx
+python-multipart
+python-docx
+pypdf

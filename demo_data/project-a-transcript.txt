@@ -1,0 +1,9 @@
+Kickoff meeting - Clinic Appointment Booking System
+Attendees: Sara (PM), Omar (Backend), Mona (Frontend), Karim (QA), Nour (Design)
+
+Sara: الهدف إن المريض يقدر يحجز موعد أونلاين من غير ما يتصل بالعيادة.
+Omar: We need login for patients and staff, with separate permissions because patient data is sensitive.
+Mona: الدكتور لازم يحدد الـavailable slots، والـreceptionist تشوف جدول اليوم.
+Karim: Reminders will be in-app notifications only for now.
+Sara: Monthly report with the number of bookings. Online payments are still an open question.
+Sara: الموبايل مهم جدًا، لازم الـUI تشتغل كويس على الموبايل.

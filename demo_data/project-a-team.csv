@@ -1,0 +1,5 @@
+name,role_title,skills,capacity_hours_per_week,available_from,available_to
+Omar Hassan,Backend Developer,python;fastapi;postgresql,30,2026-11-01,2026-12-15
+Mona Adel,Frontend Developer,javascript;html;css,25,2026-11-01,2026-12-15
+Karim Samir,QA Engineer,testing;pytest,20,2026-11-08,2026-12-15
+Nour Fathy,UI/UX Designer,figma;ux,15,2026-11-01,2026-11-30

@@ -61,3 +61,17 @@ These decisions are agreed upon and must not be changed without a documented rea
 - **Status:** Approved
 - **Context:** A duplicate `initial_schema` revision produced two root heads and broke `alembic upgrade head`. Tests also ran against the development database.
 - **Decision:** One linear migration chain, enforced by `test_alembic_has_single_head`. Tests run only against `nexus_test` (the suite refuses any database whose name does not end in `_test`), built from the real migrations and cleaned after every test.
+
+### ADR-004: Frontend continues as vanilla JS (decision at end of M2)
+- **Status:** Approved
+- **Context:** The blueprint requires a keep-or-migrate decision at the end of M2. The inherited prototype stored everything in `localStorage`, which the M2 DoD forbids.
+- **Decision:** Keep the existing vanilla JS + CSS front-end (no React). `app.js` was rewritten to use the API as the only data source, reusing `styles.css` and `auth.js`. Screens for later milestones (scope review, plan, updates, decisions) are disabled until their milestone and will be rebuilt on the real API.
+- **Why:** Login, project, sources and team screens, file upload, and CSV import were all delivered without a build step or framework; the app has few screens; Docker/CI stay simple.
+- **Revisit if:** M7 (change review with diffs) or M8 (portfolio dashboard) needs more client-side state than plain JS can maintain cleanly.
+- **Consequence:** The old localStorage prototype remains available in Git history only.
+
+### ADR-005: Source ingestion and CSV import rules (M2)
+- Only extracted text is stored; uploads are never written to disk or executed.
+- Limits: 5 MB per file; types `.txt .md .docx .pdf`; scanned or empty PDFs are rejected (no OCR).
+- Team CSV import is all-or-nothing, reports errors per line, and rejects duplicate names.
+- A Team Leader gets project access only through `project_members`, created when the PM links a team member to a user with the `TEAM_LEADER` role.

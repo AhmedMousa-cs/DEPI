@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from app.auth.security import create_access_token, verify_password
+
 from app.auth.dependencies import get_current_user
+from app.auth.security import create_access_token, verify_password
 from app.db.models import User
 from app.db.session import get_db
 
@@ -18,6 +19,7 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    role: str
 
 
 class UserOut(BaseModel):
@@ -31,11 +33,8 @@ class UserOut(BaseModel):
 def login(body: LoginRequest, db: Session = Depends(get_db)):
     user = db.scalar(select(User).where(User.email == body.email.strip().lower()))
     if user is None or not verify_password(body.password, user.password_hash):
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, "Invalid email or password"
-        )
-    token = create_access_token({"sub": str(user.id), "role": user.role})
-    return TokenResponse(access_token=token)
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
+    return TokenResponse(access_token=create_access_token(user.id, user.role), role=user.role)
 
 
 @router.get("/me", response_model=UserOut)

@@ -1,36 +1,34 @@
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
-from app.config import settings
-from app.db.models import User, ProjectMember
+
+from app.auth.security import decode_access_token
+from app.db.models import ProjectMember, User
 from app.db.session import get_db
 
-security_scheme = HTTPBearer()
+# auto_error=False so a missing token is always 401 (not 403, which depends on the FastAPI version)
+security_scheme = HTTPBearer(auto_error=False)
+
+
+def _unauthorized(detail: str) -> HTTPException:
+    return HTTPException(status.HTTP_401_UNAUTHORIZED, detail, headers={"WWW-Authenticate": "Bearer"})
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security_scheme),
     db: Session = Depends(get_db),
 ) -> User:
-    token = credentials.credentials
+    if credentials is None:
+        raise _unauthorized("Not authenticated")
     try:
-        payload = jwt.decode(
-            token, settings.jwt_secret, algorithms=[settings.jwt_algorithm]
-        )
-        user_id = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(
-                status.HTTP_401_UNAUTHORIZED, "Invalid authentication token"
-            )
-    except jwt.PyJWTError:
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, "Invalid authentication token"
-        )
-
-    user = db.get(User, int(user_id))
+        payload = decode_access_token(credentials.credentials)
+        user_id = int(payload.get("sub"))
+    except (jwt.PyJWTError, TypeError, ValueError):
+        raise _unauthorized("Invalid authentication token")
+    user = db.get(User, user_id)
     if user is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
+        raise _unauthorized("User not found")
     return user
 
 
@@ -50,7 +48,6 @@ def require_project_access(
 ) -> User:
     if user.role == "PM":
         return user
-    link = db.get(ProjectMember, (project_id, user.id))
-    if link is None:
+    if db.get(ProjectMember, (project_id, user.id)) is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Access to project denied")
     return user

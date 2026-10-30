@@ -12,8 +12,8 @@ httpx
 python-multipart
 python-docx
 pypdf
-openai
+groq
+anthropic
 langgraph
 langgraph-checkpoint-postgres
 langfuse>=3,<4
-passlib[argon2]>=1.7.4

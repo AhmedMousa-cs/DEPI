@@ -23,6 +23,7 @@ def extract(sources: list[dict], max_attempts: int | None = None) -> tuple[list[
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
         schema=ExtractionOutput,
         max_attempts=max_attempts or settings.llm_max_attempts,
+        max_tokens=settings.llm_max_output_tokens,
     )
     parsed = unwrap_parsed(result, ExtractionOutput)
     try:

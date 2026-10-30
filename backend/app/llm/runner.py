@@ -60,7 +60,8 @@ def run_structured(*, project_id: int, job_id: int | None, agent: str, prompt_ve
             "prompt_version": prompt_version, "model": model_name}
     with tracer.generation(name=agent, model=model_name, metadata=meta, session_id=project_id) as gen:
         try:
-            result = call(model=model_factory(), messages=messages, schema=schema, max_attempts=limit)
+            result = call(model=model_factory(), messages=messages, schema=schema, max_attempts=limit,
+                          max_tokens=settings.llm_max_output_tokens)
             parsed = unwrap_parsed(result, schema)
             try:
                 usage, note = extract_usage(result), None

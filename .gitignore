@@ -1,10 +1,11 @@
 # secrets
-.env
+.env*
+!.env.example
 
 # python
 __pycache__/
 *.pyc
-.venv/
+.venv*/
 .pytest_cache/
 
 # node
@@ -18,7 +19,4 @@ uploads/
 .vscode/
 .idea/
 .DS_Store
-Thumbs.db.venv*/
-
-.env*
-!.env.example
+Thumbs.db

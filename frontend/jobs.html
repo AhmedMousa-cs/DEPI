@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEXUS | Jobs and approval gate</title>
+<style>
+ body{font-family:system-ui,sans-serif;max-width:820px;margin:24px auto;padding:0 16px;color:#17233a}
+ section{border:1px solid #dde5ef;border-radius:10px;padding:16px;margin-bottom:16px}
+ button{padding:7px 14px;margin:4px 6px 4px 0;cursor:pointer}
+ textarea,select,input{width:100%;padding:7px;margin:6px 0;box-sizing:border-box}
+ .bar{height:8px;background:#dde5ef;border-radius:99px;overflow:hidden}
+ .bar span{display:block;height:100%;width:0;background:#0e7c86}
+ pre{background:#f4f7fb;padding:10px;overflow:auto;font-size:12px}
+ .err{color:#b00020}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="auth.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+let role = "", timer = null;
+
+async function j(path, opts) {
+  const r = await apiFetch(path, opts);
+  const b = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(typeof b.detail === "string" ? b.detail : JSON.stringify(b.detail || b));
+  return b;
+}
+const post = (path, body) => j(path, { method: "POST", body: JSON.stringify(body) });
+const pid = () => $("proj").value;
+
+async function main() {
+  const me = await j("/auth/me");
+  role = me.role;
+  $("app").innerHTML =
+    '<h2>NEXUS: jobs and approval gate <small id="who"></small></h2><button id="out">Sign out</button>' +
+    '<section><label>Project <select id="proj"></select></label></section>' +
+    '<section><h3>Background job (demo.echo)</h3><div id="jobctl"></div>' +
+    '<div class="bar"><span id="bar"></span></div><p id="jobstate">No job started.</p><pre id="joblist">-</pre></section>' +
+    '<section><h3>LangGraph approval gate</h3><div id="graphctl"></div><pre id="graphstate">-</pre></section>';
+  $("who").textContent = "(" + me.email + ", " + role + ")";
+  $("out").onclick = logout;
+
+  const projects = await j("/projects");
+  projects.forEach((p) => {
+    const o = document.createElement("option");
+    o.value = p.id; o.textContent = "#" + p.id + " " + p.name;
+    $("proj").appendChild(o);
+  });
+  $("proj").onchange = refresh;
+  if (role === "PM") pmControls();
+  refresh();
+}
+
+function pmControls() {
+  $("jobctl").innerHTML = '<button id="runjob">Run demo job (10 steps)</button>';
+  $("runjob").onclick = async () => {
+    try {
+      const job = await post("/projects/" + pid() + "/jobs", { type: "demo.echo", params: { steps: 10, delay: 1, message: "ui" } });
+      poll(job.id);
+    } catch (e) { alert(e.message); }
+    refresh();
+  };
+  $("graphctl").innerHTML =
+    '<textarea id="gtext" rows="3" placeholder="Input text for the draft"></textarea>' +
+    '<button id="gstart">Start graph</button>' +
+    '<input id="gcomment" placeholder="PM comment (required for reject/modify)">' +
+    '<button id="gapprove">Approve</button><button id="gmodify">Modify</button><button id="greject">Reject</button>';
+  $("gstart").onclick = () => act("/graph/start", { input_text: $("gtext").value });
+  ["approve", "modify", "reject"].forEach((d) => {
+    const decision = { approve: "approved", modify: "modified", reject: "rejected" }[d];
+    $("g" + d).onclick = () => act("/graph/resume", { decision, comment: $("gcomment").value });
+  });
+}
+
+async function act(path, body) {
+  try { await post("/projects/" + pid() + path, body); } catch (e) { alert(e.message); }
+  refresh();
+}
+
+function poll(id) {
+  clearInterval(timer);
+  const tick = async () => {
+    const jb = await j("/jobs/" + id);
+    $("bar").style.width = jb.progress + "%";
+    $("jobstate").textContent = "job #" + jb.id + ": " + jb.status + " " + jb.progress + "% (attempts " + jb.attempts + ")" +
+      (jb.error ? " | error: " + jb.error : "") + (jb.status === "failed" && role === "PM" ? " | press Run again to retry" : "");
+    $("jobstate").className = jb.status === "failed" ? "err" : "";
+    if (["done", "failed", "cancelled"].includes(jb.status)) clearInterval(timer);
+  };
+  tick().catch(() => {});
+  timer = setInterval(() => tick().catch(() => {}), 2000);
+}
+
+async function refresh() {
+  if (!pid()) return;
+  try {
+    const jobs = await j("/projects/" + pid() + "/jobs");
+    $("joblist").textContent = jobs.map((x) => "#" + x.id + " " + x.type + " " + x.status + " " + x.progress + "%").join("\n") || "no jobs";
+  } catch (e) { $("joblist").textContent = e.message; }
+  try {
+    $("graphstate").textContent = JSON.stringify(await j("/projects/" + pid() + "/graph/status"), null, 2);
+  } catch (e) { $("graphstate").textContent = e.message; }
+}
+
+if (!getToken()) showLogin(); else main().catch((e) => { if (e.message !== "unauthorized") alert(e.message); });
+</script>
+</body>
+</html>

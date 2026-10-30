@@ -3,6 +3,7 @@ import logging
 from typing import Type, TypeVar
 from pydantic import BaseModel, ValidationError
 
+from app.config import settings
 from app.llm.contracts import ChatModel, LLMUsage, StructuredResult
 from app.llm.errors import LLMConfigurationError, LLMProviderError, StructuredValidationError
 
@@ -16,8 +17,9 @@ def structured_call(
     messages: list[dict[str, str]],
     schema: Type[T],
     max_attempts: int = 3,
-    max_tokens: int = 2000,
+    max_tokens: int | None = None,
 ) -> StructuredResult:
+    max_tokens = max_tokens or settings.llm_max_output_tokens
     curr_messages = list(messages)
     json_schema = schema.model_json_schema()
 

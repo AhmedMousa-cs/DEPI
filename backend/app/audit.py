@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Any
+
 from sqlalchemy.orm import Session
 
 from app.db.models import AuditLog, User
@@ -13,15 +17,20 @@ def write_audit(
     action: str,
     entity_type: str,
     entity_id: int | str | None = None,
-    before: dict | None = None,
-    after: dict | None = None,
+    before: dict[str, Any] | None = None,
+    after: dict[str, Any] | None = None,
 ) -> AuditLog:
-    """Add an audit row to the current session.
-
-    Uses flush, not commit: the row is saved in the same transaction as the
-    change it describes, so both succeed or both roll back.
     """
-    entry = AuditLog(
+    Add an audit event to the current transaction.
+
+    This function intentionally uses the same names as the AuditLog model:
+    entity_type and entity_id.
+
+    It does not commit. The caller owns the transaction, so the audit row
+    and the business change succeed or roll back together.
+    """
+
+    audit_entry = AuditLog(
         actor=actor,
         action=action,
         entity_type=entity_type,
@@ -29,6 +38,8 @@ def write_audit(
         before=before,
         after=after,
     )
-    db.add(entry)
+
+    db.add(audit_entry)
     db.flush()
-    return entry
+
+    return audit_entry

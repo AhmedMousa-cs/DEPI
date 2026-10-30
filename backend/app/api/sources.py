@@ -1,5 +1,4 @@
 from pathlib import PurePosixPath
-
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -15,7 +14,7 @@ from app.schemas.source import SourceDetail, SourceOut
 
 router = APIRouter(prefix="/projects/{project_id}/sources", tags=["sources"])
 
-ALLOWED_KINDS = {"transcript", "note", "file"}  # 'brief' is edited via PATCH /projects/{id}
+ALLOWED_KINDS = {"transcript", "note", "file"}
 INITIAL_STATUSES = {"setup", "planning", "scope_review", "plan_review"}
 
 

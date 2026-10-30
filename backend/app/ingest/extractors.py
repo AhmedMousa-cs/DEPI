@@ -1,4 +1,3 @@
-"""File -> plain text. Only the extracted text is ever stored; nothing is executed."""
 import io
 import zipfile
 from pathlib import PurePosixPath
@@ -20,7 +19,6 @@ def extension_of(filename: str) -> str:
 
 
 def clean_text(text: str) -> str:
-    # Postgres TEXT cannot contain NUL bytes.
     return text.replace("\x00", "").replace("\r\n", "\n").replace("\r", "\n").strip()
 
 

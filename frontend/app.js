@@ -1,258 +1,162 @@
-"use strict";
-/* NEXUS front-end (M2): talks to the FastAPI backend. PostgreSQL is the source of truth;
-   nothing business-related is stored in the browser. */
-
-const MAX_UPLOAD = 5 * 1024 * 1024;
-const STATUS = { setup: "Setup", planning: "Planning", scope_review: "Scope review", plan_review: "Plan review", active: "Active", closed: "Closed" };
-const KIND = { brief: "Brief", transcript: "Transcript", note: "Note", file: "File" };
-
-const state = { me: null, projects: [], project: null, team: [], leaders: [], page: "portfolio", tab: "overview", modal: null, notice: null, navOpen: false };
-const app = document.getElementById("app");
-const isPM = () => state.me && state.me.role === "PM";
-
-/* ---------- helpers ---------- */
-function esc(v) { return String(v == null ? "" : v).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
-function fmtDate(v) { return v ? new Date(v + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "Not set"; }
-function fmtDateTime(v) { return v ? new Date(v).toLocaleString() : ""; }
-function kv(k, v) { return `<div class="keyval"><small>${esc(k)}</small><b>${esc(v)}</b></div>`; }
-function field(label, inner, full) { return `<div class="field${full ? " full" : ""}"><label>${label}</label>${inner}</div>`; }
-function statusBadge(s) { return `<span class="badge ${s === "active" ? "green" : s === "closed" ? "" : "blue"}">${esc(STATUS[s] || s)}</span>`; }
-
-function errorMessage(data, status) {
-  const d = data && data.detail;
-  if (typeof d === "string") return d;
-  if (Array.isArray(d)) return d.map(e => ((e.loc || []).filter(x => x !== "body").join(".") + ": " + e.msg)).join("; ");
-  if (d && d.message) return [d.message].concat((d.errors || []).map(e => "Line " + e.line + ": " + e.message)).join("\n");
-  return "Request failed (" + status + ")";
+const KEY="project-intelligence-mvp-v1";
+const app=document.getElementById("app");
+let db=loadDb(), page="portfolio", activeProjectId=null, activeTab="overview", modalOpen=false, mobileNavOpen=false;
+function loadDb(){try{const x=JSON.parse(localStorage.getItem(KEY)||"{}");return{projects:Array.isArray(x.projects)?x.projects:[]};}catch(_){return{projects:[]};}}
+function saveDb(){localStorage.setItem(KEY,JSON.stringify(db));}
+function uid(p){return p+"-"+Math.random().toString(36).slice(2,9);}
+function esc(v){return String(v==null?"":v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
+function todayIso(){return new Date().toISOString().slice(0,10);}
+function datePlus(n){const d=new Date();d.setDate(d.getDate()+n);return d.toISOString().slice(0,10);}
+function prettyDate(v){return v?new Date(v+"T12:00:00").toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"}):"Not set";}
+function projectById(id){return db.projects.find(p=>p.id===id);}
+function statusLabel(s){return({intake:"Intake",scope_review:"Scope review",plan_review:"Plan approval",ready:"Ready to start",active:"Active",completed:"Completed"})[s]||"Intake";}
+function statusClass(s){return({intake:"blue",scope_review:"orange",plan_review:"orange",ready:"green",active:"green",completed:""})[s]||"";}
+function progressOf(p){const t=(p.stories||[]).flatMap(s=>s.tasks||[]);return t.length?Math.round(t.filter(x=>x.status==="Done").length*100/t.length):0;}
+function keyval(k,v){return '<div class="keyval"><small>'+esc(k)+'</small><b>'+esc(v)+'</b></div>';}
+function navButton(k,icon,label){return '<button data-action="navigate" data-page="'+k+'" class="'+(page===k?"active":"")+'"><span class="nav-icon">'+icon+'</span>'+label+'</button>';}
+function renderShell(){
+ const nav=navButton("portfolio","▦","Portfolio")+navButton("decisions","⚖","Decision center");
+ app.innerHTML='<div class="app-shell"><aside class="sidebar'+(mobileNavOpen?" open":"")+'"><div class="brand"><div class="brand-mark">O</div><div><strong>Orchestrator</strong><small>Project intelligence</small></div></div><div class="nav-label">Workspace</div><nav class="nav">'+nav+'<div class="nav-label" style="margin:17px 0 3px">Projects</div>'+db.projects.map(p=>'<button data-action="open-project" data-id="'+esc(p.id)+'" class="'+(activeProjectId===p.id&&page==="project"?"active":"")+'"><span class="nav-icon">◉</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(p.name)+'</span></button>').join("")+'<button data-action="show-create"><span class="nav-icon">＋</span>New project</button></nav><div class="sidebar-spacer"></div><div class="sidebar-note"><b>Human approval stays in control</b><br>Agents prepare evidence and recommendations. PMs approve plan changes.</div></aside><div class="main-area"><header class="topbar"><div style="display:flex;gap:12px;align-items:center"><button class="btn btn-secondary btn-small mobile-menu" data-action="toggle-nav">☰</button><div class="crumb">Project Intelligence / <b>'+esc(pageTitle())+'</b></div></div><div class="top-actions"><span class="prototype-pill">Rule-based prototype</span><button class="btn btn-primary btn-small" data-action="show-create">＋ Create project</button><div class="avatar">PM</div></div></header><main id="screen" class="content"></main></div></div>'+(modalOpen?renderCreateModal():"");
+ renderScreen();
 }
-
-async function api(path, options = {}) {
-  const res = await apiFetch(path, options);   // from auth.js (handles 401)
-  if (res.status === 204) return null;
-  let data = null;
-  try { data = await res.json(); } catch (_) { /* no body */ }
-  if (!res.ok) throw new Error(errorMessage(data, res.status));
-  return data;
+function pageTitle(){if(page==="project"){const p=projectById(activeProjectId);return p?p.name:"Project workspace";}return page==="decisions"?"Decision center":"Portfolio";}
+function renderScreen(){const s=document.getElementById("screen");if(!s)return;if(page==="project"){const p=projectById(activeProjectId);if(!p){page="portfolio";renderShell();return;}s.innerHTML=renderProject(p);return;}s.innerHTML=page==="decisions"?renderDecisionCenter():renderPortfolio();}
+function renderCreateModal(){return '<div class="modal-backdrop" data-action="backdrop-close"><section class="modal" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>Create a project</h2><p>Start with a brief. Initial meeting transcripts are optional.</p></div><button class="close-x" data-action="close-modal">×</button></div><form data-form="create-project"><div class="modal-body"><div class="form-grid"><div class="field"><label>Project name *</label><input name="name" required maxlength="90" placeholder="Customer portal refresh"></div><div class="field"><label>Project owner</label><input name="owner" placeholder="Name"></div><div class="field"><label>Goal</label><input name="goal" placeholder="Outcome the project should deliver"></div><div class="field"><label>Team members</label><input name="team" placeholder="Comma-separated names"></div><div class="field"><label>Start date</label><input name="startDate" type="date" value="'+todayIso()+'"></div><div class="field"><label>Target date</label><input name="dueDate" type="date" value="'+datePlus(30)+'"></div><div class="field full"><label>Project brief *</label><textarea name="brief" required placeholder="Problem, outcome, constraints and known requirements"></textarea><span class="hint">Primary kickoff input.</span></div><div class="field full"><label>Initial transcript (optional)</label><textarea name="transcript" placeholder="Paste kickoff notes or transcript"></textarea><span class="hint">Team Leader updates are submitted later, after execution starts.</span></div><div class="field full"><label>Or attach a TXT transcript</label><input name="transcriptFile" type="file" accept=".txt,text/plain"></div></div></div><div class="modal-foot"><button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button><button class="btn btn-primary">Create project</button></div></form></section></div>';}
+function statCard(label,value,icon,color){return '<div class="card stat"><div><div class="label">'+esc(label)+'</div><div class="value">'+esc(value)+'</div></div><div class="stat-icon '+color+'">'+icon+'</div></div>';}
+function projectRow(p){const pct=progressOf(p);return '<div class="project-row"><div><div class="project-title">'+esc(p.name)+'</div><div class="project-sub">'+esc(p.goal||"No goal added")+' · Owner: '+esc(p.owner||"Unassigned")+'</div><div class="row-meta"><span class="badge '+statusClass(p.status)+'">'+statusLabel(p.status)+'</span><span class="subtle">Target '+prettyDate(p.dueDate)+'</span><span class="subtle">'+(p.stories||[]).length+' stories</span></div>'+(p.stories&&p.stories.length?'<div class="progress"><span style="width:'+pct+'%"></span></div>':'')+'</div><button class="btn btn-secondary btn-small" data-action="open-project" data-id="'+esc(p.id)+'">Open workspace →</button></div>';}
+function collectAlerts(){const a=[];db.projects.forEach(p=>{(p.risks||[]).filter(r=>r.status!=="closed"&&r.score>=15).forEach(r=>a.push({level:"critical",title:"High risk · "+p.name,message:r.title+" (score "+r.score+"/25)"}));const blocked=(p.stories||[]).flatMap(s=>s.tasks||[]).filter(t=>t.status==="Blocked").length;if(blocked)a.push({level:"critical",title:"Blocked work · "+p.name,message:blocked+" task(s) need attention."});if(p.status==="active"&&p.dueDate&&p.dueDate<todayIso())a.push({level:"critical",title:"Target date passed · "+p.name,message:"Review the project schedule."});const n=(p.proposals||[]).filter(x=>x.status==="pending").length;if(n)a.push({level:"info",title:"Decision needed · "+p.name,message:n+" proposal(s) await PM review."});});return a;}
+function renderPortfolio(){const ps=db.projects, active=ps.filter(p=>p.status==="active").length,pending=ps.reduce((n,p)=>n+(p.proposals||[]).filter(x=>x.status==="pending").length,0),risks=ps.reduce((n,p)=>n+(p.risks||[]).filter(r=>r.status!=="closed"&&r.score>=15).length,0),alerts=collectAlerts();return '<div class="page-head"><div><div class="eyebrow">Global Supervisor</div><h1>Portfolio overview</h1><p>Project status, high-priority risks and decisions that need your attention.</p></div><button class="btn btn-primary" data-action="show-create">＋ Create project</button></div><div class="grid stats">'+statCard("Total projects",ps.length,"▦","")+statCard("In execution",active,"↗","green")+statCard("Pending decisions",pending,"⚖","orange")+statCard("High risks",risks,"⚠","red")+'</div><div class="grid dash-grid"><section class="card"><div class="card-head"><div><h2>Projects</h2><p>One workspace per project</p></div><span class="badge">'+ps.length+' total</span></div><div class="card-body">'+(ps.length?'<div class="project-list">'+ps.map(projectRow).join("")+'</div>':'<div class="empty"><div class="empty-icon">◈</div><h3>Your portfolio is ready</h3><p>Create the first project with a brief and optional kickoff transcript.</p><button class="btn btn-primary" data-action="show-create">Create first project</button></div>')+'</div></section><section class="card"><div class="card-head"><div><h2>Supervisor alerts</h2><p>Derived from project reports and events</p></div></div><div class="card-body">'+(alerts.length?'<div class="alert-list">'+alerts.slice(0,8).map(a=>'<div class="alert '+a.level+'"><strong>'+esc(a.title)+'</strong><p>'+esc(a.message)+'</p></div>').join("")+'</div>':'<div class="empty" style="padding:25px 15px"><div class="empty-icon">✓</div><h3>No active alerts</h3><p>Alerts appear for high risks, blockers or overdue milestones.</p></div>')+'</div></section></div><p class="footnote">Demo extraction and alerts use deterministic rules. Human approvals are recorded in this browser.</p>';}
+function renderProject(p){
+ const tabs=[["overview","Overview"],["scope","Scope review"],["plan","Work plan"],["updates","Team updates"],["decisions","Decisions"]];
+ const action=p.status==="ready"?'<button class="btn btn-primary btn-small" data-action="start-execution" data-id="'+esc(p.id)+'">Start execution</button>':p.status==="active"?'<button class="btn btn-secondary btn-small" data-action="complete-project" data-id="'+esc(p.id)+'">Mark complete</button>':"";
+ return '<div class="workspace-head"><div class="workspace-title"><div class="project-monogram">'+esc((p.name||"P").slice(0,1).toUpperCase())+'</div><div><h1>'+esc(p.name)+'</h1><p>'+esc(p.goal||"Project workspace")+'</p></div></div><div style="display:flex;gap:8px;align-items:center"><span class="badge '+statusClass(p.status)+'">'+statusLabel(p.status)+'</span>'+action+'<button class="btn btn-secondary btn-small" data-action="download-report" data-id="'+esc(p.id)+'">Export report</button></div></div><div class="row-meta" style="margin-top:-5px"><span class="subtle">Owner: '+esc(p.owner||"Unassigned")+'</span><span class="subtle">Start: '+prettyDate(p.startDate)+'</span><span class="subtle">Target: '+prettyDate(p.dueDate)+'</span><span class="subtle">Progress: '+progressOf(p)+'%</span></div><div class="tabs">'+tabs.map(t=>'<button class="'+(activeTab===t[0]?"active":"")+'" data-action="project-tab" data-tab="'+t[0]+'">'+t[1]+'</button>').join("")+'</div>'+(activeTab==="overview"?renderOverview(p):activeTab==="scope"?renderScope(p):activeTab==="plan"?renderPlan(p):activeTab==="updates"?renderUpdates(p):renderProjectDecisions(p));
 }
-const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body) });
-const patch = (path, body) => api(path, { method: "PATCH", body: JSON.stringify(body) });
-
-function uploadSource(projectId, { kind, title, text, file }) {
-  const fd = new FormData();
-  fd.append("kind", kind);
-  if (title) fd.append("title", title);
-  if (text) fd.append("text", text);
-  if (file) fd.append("file", file);
-  return api(`/projects/${projectId}/sources`, { method: "POST", body: fd });
+function workflowSteps(p){return[
+ {title:"Project intake",note:"Brief + optional initial transcript",done:true},
+ {title:"Evidence extraction",note:"Meeting and Evidence Agent",done:(p.extractedItems||[]).length>0,current:p.status==="intake"},
+ {title:"Human scope approval",note:"PM or scope owner reviews evidence",done:(p.extractedItems||[]).some(i=>i.status==="approved")&&["plan_review","ready","active","completed"].includes(p.status),current:p.status==="scope_review"},
+ {title:"Stories and project plan",note:"Requirements, timeline, resources and risks",done:!!p.planProposal&&p.planProposal.status==="approved",current:p.status==="plan_review"},
+ {title:"Execution and updates",note:"Team Leader runtime event flow",done:["active","completed"].includes(p.status),current:p.status==="ready"}
+];}
+function riskRow(r){return '<div class="risk-row"><div class="risk-meta"><span class="badge '+(r.score>=15?"red":r.score>=8?"orange":"green")+'">'+esc(r.severity||"Risk")+' · '+esc(r.score)+'/25</span><b style="font-size:12px">'+esc(r.title)+'</b></div><p>'+esc(r.description||"")+'</p></div>';}
+function updateRow(u){return '<div class="update-row"><div class="risk-meta"><span class="badge '+(u.type==="blocker"?"red":"blue")+'">'+esc(u.type)+'</span><b style="font-size:12px">'+esc(u.author)+'</b><span class="subtle">'+prettyDate((u.date||"").slice(0,10))+'</span></div><p>'+esc(u.text)+'</p></div>';}
+function renderOverview(p){
+ const tasks=(p.stories||[]).flatMap(s=>s.tasks||[]), risks=(p.risks||[]).filter(r=>r.status!=="closed");
+ return '<div class="grid two-col"><div><section class="card section-card"><h2>Project snapshot</h2><p class="section-intro">Current baseline and execution summary.</p><div class="keyvals">'+keyval("Project owner",p.owner||"Unassigned")+keyval("Team",(p.team||[]).join(", ")||"Not assigned")+keyval("Kickoff sources",p.initialTranscript?"Brief + transcript":"Brief only")+keyval("Target date",prettyDate(p.dueDate))+'</div><hr class="divider"><div class="split-head"><b style="font-size:12px">Task progress</b><span class="subtle">'+progressOf(p)+'% complete</span></div><div class="progress" style="max-width:none"><span style="width:'+progressOf(p)+'%"></span></div><div class="row-meta"><span class="badge green">'+tasks.filter(t=>t.status==="Done").length+' done</span><span class="badge orange">'+tasks.filter(t=>t.status==="Blocked").length+' blocked</span><span class="badge">'+tasks.filter(t=>t.status!=="Done").length+' open</span></div></section><section class="card section-card"><h2>Open risks</h2><p class="section-intro">Risk Analysis Agent signals for PM review.</p>'+(risks.length?risks.slice(0,4).map(riskRow).join(""):'<div class="subtle">Risk analysis runs after the plan proposal is prepared.</div>')+'</section></div><div><section class="card section-card"><h2>Workflow status</h2><p class="section-intro">Agents run in order. Human approval controls the gates.</p><div class="workflow">'+workflowSteps(p).map((s,i)=>'<div class="workflow-step"><span class="step-num '+(s.done?"done":"")+'">'+(s.done?"✓":i+1)+'</span><span class="step-copy"><b>'+esc(s.title)+'</b><small>'+esc(s.note)+'</small></span><span class="badge '+(s.done?"green":s.current?"orange":"blue")+'">'+(s.done?"Done":s.current?"Next":"Waiting")+'</span></div>').join("")+'</div></section><section class="card section-card"><h2>Recent team updates</h2><p class="section-intro">Runtime events submitted after execution starts.</p>'+((p.updates||[]).length?p.updates.slice(-3).reverse().map(updateRow).join(""):'<div class="subtle">No runtime updates yet.</div>')+'</section></div></div>';
 }
-
-/* ---------- data loading ---------- */
-async function reloadProjects() { state.projects = await api("/projects"); }
-async function reloadProject() {
-  const id = state.project.id;
-  const [project, team] = await Promise.all([api(`/projects/${id}`), api(`/projects/${id}/team`)]);
-  state.project = project; state.team = team;
+function renderScope(p){
+ const items=p.extractedItems||[];
+ const top='<div class="page-head"><div><div class="eyebrow">Human gate · US02 / US03</div><h1>Scope review</h1><p>Review evidence-linked drafts before they become the approved project baseline.</p></div>'+(!items.length?'<button class="btn btn-primary" data-action="process-intake" data-id="'+esc(p.id)+'">Run demo extraction</button>':"")+'</div>';
+ if(!items.length)return top+'<div class="callout warning"><strong>Kickoff extraction:</strong> This step uses the brief and optional initial transcript only. Team Leader updates arrive later, after execution starts.</div><section class="card section-card"><h2>Project brief</h2><p class="section-intro">Original source material is kept separate from generated drafts.</p><div style="white-space:pre-wrap;font-size:13px">'+esc(p.brief)+'</div>'+(p.initialTranscript?'<hr class="divider"><h3>Initial transcript</h3><div style="white-space:pre-wrap;font-size:12px;color:#586b83">'+esc(p.initialTranscript)+'</div>':"")+'</section>';
+ const done=items.every(i=>i.status!=="draft"),approved=items.filter(i=>i.status==="approved").length;
+ return top+'<div class="callout"><strong>Review rule:</strong> Each item keeps its source excerpt and demo confidence. Approve, edit or reject items individually. Only approved items feed the next agent.</div><div class="item-list">'+items.map(i=>renderItem(p,i)).join("")+'</div><section class="card section-card" style="margin-top:15px"><div class="split-head"><div><h2>Scope baseline</h2><p class="section-intro">Approved '+approved+' of '+items.length+' items.</p></div><button class="btn btn-primary" '+(!done||!approved?"disabled":"")+' data-action="approve-scope" data-id="'+esc(p.id)+'">Approve scope and prepare plan</button></div>'+(!done?'<p class="subtle">Resolve every draft before creating a plan proposal.</p>':!approved?'<p class="subtle">Approve at least one item to continue.</p>':'<p class="subtle">This creates a draft plan for PM review. It does not start execution.</p>')+'</section>';
 }
-async function openProject(id) {
-  try { state.project = { id }; await reloadProject(); state.page = "project"; state.tab = "overview"; state.navOpen = false; }
-  catch (e) { state.page = "portfolio"; state.project = null; state.notice = { type: "error", text: e.message }; }
-  render();
+function renderItem(p,i){const color=i.status==="approved"?"green":i.status==="rejected"?"red":"orange";return '<article class="item-card"><div class="item-title">'+esc(i.text)+'</div><div class="row-meta"><span class="badge">'+esc(i.type)+'</span><span class="badge '+color+'">'+esc(i.status)+'</span><span class="badge blue">Demo confidence '+Math.round(i.confidence*100)+'%</span></div><div class="item-source"><b>Source · '+esc(i.sourceLabel)+':</b> '+esc(i.sourceExcerpt)+'</div>'+(i.status==="draft"?'<div class="item-actions"><button class="btn btn-primary btn-small" data-action="item-approve" data-id="'+esc(p.id)+'" data-item="'+esc(i.id)+'">Approve</button><button class="btn btn-secondary btn-small" data-action="item-edit" data-id="'+esc(p.id)+'" data-item="'+esc(i.id)+'">Edit</button><button class="btn btn-danger btn-small" data-action="item-reject" data-id="'+esc(p.id)+'" data-item="'+esc(i.id)+'">Reject</button></div>':"")+'</article>';}
+function renderPlan(p){
+ if(!p.stories||!p.stories.length)return '<div class="page-head"><div><div class="eyebrow">US05 · Agents 3 and 4</div><h1>Work plan</h1><p>Stories, tasks, milestones, resources and risk proposals.</p></div></div><div class="empty"><div class="empty-icon">⌁</div><h3>No plan prepared yet</h3><p>Process kickoff material, review evidence and approve the scope baseline first.</p><button class="btn btn-secondary" data-action="project-tab" data-tab="scope">Go to scope review</button></div>';
+ const proposal=p.planProposal||{};
+ return '<div class="page-head"><div><div class="eyebrow">US05 · Agents 3 and 4</div><h1>Work plan</h1><p>Agent proposals remain drafts until the PM approves the baseline.</p></div></div>'+(proposal.status==="pending"?'<div class="callout warning"><strong>PM approval required:</strong> Review timeline, resource assumptions and risks in Decisions before execution can start.</div>':'<div class="callout"><strong>Approved baseline:</strong> Plan version '+esc(proposal.version||1)+' is ready for execution.</div>')+'<section class="card section-card"><div class="split-head"><div><h2>Stories and tasks</h2><p class="section-intro">Update task status as the project progresses.</p></div><span class="badge">'+p.stories.length+' stories</span></div>'+p.stories.map(s=>'<div class="story-card"><h3>'+esc(s.title)+'</h3><p>'+esc(s.description)+'</p>'+(s.tasks||[]).map(t=>'<div class="task-row"><span>'+esc(t.title)+'</span><span class="task-owner">'+esc(t.owner||"Unassigned")+'</span><select data-action="task-status" data-project="'+esc(p.id)+'" data-story="'+esc(s.id)+'" data-task="'+esc(t.id)+'"><option '+(t.status==="Not started"?"selected":"")+'>Not started</option><option '+(t.status==="In progress"?"selected":"")+'>In progress</option><option '+(t.status==="Blocked"?"selected":"")+'>Blocked</option><option '+(t.status==="Done"?"selected":"")+'>Done</option></select></div>').join("")+'</div>').join("")+'</section><div class="grid two-col"><section class="card section-card"><h2>Timeline and resources</h2><p class="section-intro">Initial estimates from Agent 3.</p><div class="keyvals">'+keyval("Target date",prettyDate(p.dueDate))+keyval("Team",(p.team||[]).join(", ")||"Unassigned")+keyval("Plan status",statusLabel(p.status))+keyval("Milestones",String(p.stories.length))+'</div></section><section class="card section-card"><h2>Risk register</h2><p class="section-intro">Initial signals from Agent 4.</p>'+((p.risks||[]).length?p.risks.map(riskRow).join(""):'<p class="subtle">No risks identified by demo rules; human review is still required.</p>')+'</section></div>';
 }
-
-/* ---------- views ---------- */
-function sidebar() {
-  const items = state.projects.map(p => `<button data-action="open-project" data-id="${p.id}" class="${state.page === "project" && state.project && state.project.id === p.id ? "active" : ""}"><span class="nav-icon">◉</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name)}</span></button>`).join("");
-  return `<aside class="sidebar${state.navOpen ? " open" : ""}"><div class="brand"><div class="brand-mark">N</div><div><strong>NEXUS</strong><small>Project intelligence</small></div></div><div class="nav-label">Workspace</div><nav class="nav"><button data-action="go-portfolio" class="${state.page === "portfolio" ? "active" : ""}"><span class="nav-icon">▦</span>Portfolio</button><div class="nav-label" style="margin:17px 0 3px">Projects</div>${items}${isPM() ? '<button data-action="modal" data-modal="create-project"><span class="nav-icon">＋</span>New project</button>' : ""}</nav><div class="sidebar-spacer"></div><div class="sidebar-note"><b>Human approval stays in control</b><br>Agents prepare drafts. The PM approves.</div></aside>`;
+function renderUpdates(p){
+ const enabled=p.status==="active";
+ return '<div class="page-head"><div><div class="eyebrow">US04 · Runtime event flow</div><h1>Team Leader updates</h1><p>Operational notes are recorded after the project enters execution.</p></div></div>'+(!enabled?'<div class="callout warning"><strong>Updates are not open yet.</strong> Approve the plan and use Start execution. Briefs and initial transcripts belong to kickoff intake.</div>':'<div class="grid two-col"><section class="card section-card"><h2>Submit an update</h2><p class="section-intro">Events are attributed and refresh project reporting.</p><form data-form="team-update"><div class="field"><label>Update type</label><select name="type"><option value="progress">Progress update</option><option value="blocker">Blocker</option><option value="note">Team note</option><option value="change">Proposed change</option></select></div><div class="field"><label>Author</label><input name="author" value="'+esc(p.owner||"Team Leader")+'"></div><div class="field"><label>Update details</label><textarea required name="text" placeholder="What changed? Include task, impact and next step."></textarea></div><button class="btn btn-primary">Post runtime update</button></form></section><section class="card section-card"><h2>Update guidance</h2><p class="section-intro">The Update Handler stores runtime events.</p><ul><li>Progress: completed work and revised estimates.</li><li>Blocker: work that cannot continue.</li><li>Proposed change: a plan change that needs PM approval.</li><li>Blockers and changes create decisions; the plan never changes automatically.</li></ul></section></div>')+'<section class="card section-card"><h2>Project event history</h2><p class="section-intro">'+(p.updates||[]).length+' runtime event(s)</p>'+((p.updates||[]).length?p.updates.slice().reverse().map(updateRow).join(""):'<div class="subtle">No runtime updates have been submitted.</div>')+'</section>';
 }
-
-function topbar() {
-  const crumb = state.page === "project" && state.project ? state.project.name || "Project" : "Portfolio";
-  return `<header class="topbar"><div style="display:flex;gap:12px;align-items:center"><button class="btn btn-secondary btn-small mobile-menu" data-action="toggle-nav">☰</button><div class="crumb">NEXUS / <b>${esc(crumb)}</b></div></div><div class="top-actions"><span class="badge">${esc(state.me.role)}</span><span class="subtle">${esc(state.me.name)}</span><button class="btn btn-secondary btn-small" data-action="logout">Sign out</button></div></header>`;
+function renderProposal(p,x){
+ const open=x.status==="pending";
+ return '<article class="decision-row"><div class="risk-meta"><span class="badge '+(x.priority==="Critical"?"red":"orange")+'">'+esc(x.priority||"Review")+'</span><span class="badge">'+esc(x.status)+'</span><span class="subtle">'+esc(p.name)+'</span></div><h3 style="margin:8px 0 0;font-size:13px">'+esc(x.title)+'</h3><p>'+esc(x.description)+'</p>'+(open?'<div class="decision-options"><button class="btn btn-primary btn-small" data-action="decision" data-choice="approve" data-id="'+esc(p.id)+'" data-proposal="'+esc(x.id)+'">Approve</button><button class="btn btn-secondary btn-small" data-action="decision" data-choice="modify" data-id="'+esc(p.id)+'" data-proposal="'+esc(x.id)+'">Modify</button><button class="btn btn-secondary btn-small" data-action="decision" data-choice="request-info" data-id="'+esc(p.id)+'" data-proposal="'+esc(x.id)+'">Request information</button><button class="btn btn-quiet btn-small" data-action="decision" data-choice="defer" data-id="'+esc(p.id)+'" data-proposal="'+esc(x.id)+'">Defer</button><button class="btn btn-danger btn-small" data-action="decision" data-choice="reject" data-id="'+esc(p.id)+'" data-proposal="'+esc(x.id)+'">Reject</button></div>':'<p class="subtle">Decision: '+esc(x.decision||x.status)+(x.decisionNote?" · "+esc(x.decisionNote):"")+'</p>')+'</article>';
 }
-
-function noticeHtml(n) { return `<div class="callout ${n.type === "ok" ? "" : "warning"}" style="white-space:pre-wrap">${esc(n.text)}</div>`; }
-
-function portfolioView() {
-  const rows = state.projects.map(p => `<div class="project-row"><div><div class="project-title">${esc(p.name)}</div><div class="project-sub">${esc(p.goal || "No goal added")}</div><div class="row-meta">${statusBadge(p.status)}<span class="subtle">${fmtDate(p.start_date)} → ${fmtDate(p.end_date)}</span></div></div><button class="btn btn-secondary btn-small" data-action="open-project" data-id="${p.id}">Open workspace →</button></div>`).join("");
-  const empty = `<div class="empty"><div class="empty-icon">◈</div><h3>${isPM() ? "No projects yet" : "No projects assigned to you"}</h3><p>${isPM() ? "Create the first project with a brief and an optional kickoff transcript." : "A Project Manager must link you as a Team Leader on a project."}</p>${isPM() ? '<button class="btn btn-primary" data-action="modal" data-modal="create-project">Create first project</button>' : ""}</div>`;
-  return `<div class="page-head"><div><div class="eyebrow">Portfolio</div><h1>${isPM() ? "All projects" : "My projects"}</h1><p>Everything shown here is loaded from the database.</p></div>${isPM() ? '<button class="btn btn-primary" data-action="modal" data-modal="create-project">＋ Create project</button>' : ""}</div><section class="card"><div class="card-body">${state.projects.length ? `<div class="project-list">${rows}</div>` : empty}</div></section>`;
+function renderProjectDecisions(p){
+ const xs=p.proposals||[], hasPlan=p.planProposal&&!xs.some(x=>x.id===p.planProposal.id);
+ return '<div class="page-head"><div><div class="eyebrow">US07 · Human authorization</div><h1>Project decisions</h1><p>Every recommendation includes evidence and waits for a PM decision.</p></div></div>'+(hasPlan?renderProposal(p,p.planProposal):"")+(xs.length?'<div class="decision-list">'+xs.slice().reverse().map(x=>renderProposal(p,x)).join("")+'</div>':'<div class="empty"><div class="empty-icon">⚖</div><h3>No project decisions yet</h3><p>Plan approval appears after scope is approved. Runtime blockers and changes appear here.</p></div>');
 }
-
-function projectView() {
-  const p = state.project;
-  const tabs = [["overview", "Overview"], ["sources", "Sources (" + p.sources.length + ")"], ["team", "Team (" + state.team.length + ")"]];
-  const later = ["Scope review (M4)", "Work plan (M5–M6)", "Updates (M7)", "Decisions (M8)"];
-  return `<div class="workspace-head"><div class="workspace-title"><div class="project-monogram">${esc((p.name || "P")[0].toUpperCase())}</div><div><h1>${esc(p.name)}</h1><p>${esc(p.goal || "No goal added")}</p></div></div><div style="display:flex;gap:8px;align-items:center">${statusBadge(p.status)}${isPM() ? '<button class="btn btn-secondary btn-small" data-action="modal" data-modal="edit-project">Edit project</button>' : ""}</div></div><div class="tabs">${tabs.map(t => `<button class="${state.tab === t[0] ? "active" : ""}" data-action="tab" data-tab="${t[0]}">${esc(t[1])}</button>`).join("")}${later.map(l => `<button disabled style="opacity:.45;cursor:not-allowed" title="Not available yet">${esc(l)}</button>`).join("")}</div>${state.tab === "sources" ? sourcesView() : state.tab === "team" ? teamView() : overviewView()}`;
+function renderDecisionCenter(){
+ const items=[];db.projects.forEach(p=>{if(p.planProposal&&!p.proposals.some(x=>x.id===p.planProposal.id))items.push({p:p,x:p.planProposal});(p.proposals||[]).forEach(x=>items.push({p:p,x:x}));});
+ const pending=items.filter(o=>o.x.status==="pending");
+ const history=items.filter(o=>o.x.status!=="pending");
+ return '<div class="page-head"><div><div class="eyebrow">Global Supervisor → Project Manager</div><h1>Decision center</h1><p>Review proposals from project orchestrators. Approved actions update a versioned plan.</p></div></div><div class="callout"><strong>Decision authority:</strong> Agents prepare evidence and recommendations. Only the PM approves, rejects, modifies, requests information or defers.</div>'+(pending.length?'<div class="decision-list">'+pending.map(o=>renderProposal(o.p,o.x)).join("")+'</div>':'<div class="empty"><div class="empty-icon">✓</div><h3>No pending decisions</h3><p>Plan approvals, blockers and change proposals appear here.</p></div>')+(history.length?'<section class="card section-card" style="margin-top:15px"><h2>Decision history</h2>'+history.reverse().map(o=>renderProposal(o.p,o.x)).join("")+'</section>':"");
 }
-
-function overviewView() {
-  const p = state.project, leader = state.team.find(m => m.is_leader);
-  const hours = state.team.reduce((n, m) => n + Number(m.capacity_hours_per_week || 0), 0);
-  return `<div class="grid two-col"><section class="card section-card"><h2>Project snapshot</h2><p class="section-intro">Saved in PostgreSQL; survives a browser refresh.</p><div class="keyvals">${kv("Status", STATUS[p.status] || p.status)}${kv("Start", fmtDate(p.start_date))}${kv("Target end", fmtDate(p.end_date))}${kv("Team", state.team.length + " members · " + hours + " h/week")}${kv("Team Leader", leader ? leader.name + (leader.user_email ? " (" + leader.user_email + ")" : "") : "Not assigned")}${kv("Sources", String(p.sources.length))}</div></section><section class="card section-card"><h2>Project brief</h2><p class="section-intro">${esc(p.goal || "No goal added")}</p><div style="white-space:pre-wrap;font-size:13px">${esc(p.brief || "No brief")}</div></section></div><div class="callout">Requirement extraction, scope approval and planning arrive in the next milestones (M4 onward).</div>`;
+function touch(p){p.lastUpdated=new Date().toISOString();p.history=p.history||[];p.history.push({at:p.lastUpdated,status:p.status});}
+function createProject(data){
+ const p={id:uid("project"),name:data.name.trim(),goal:data.goal.trim(),owner:data.owner.trim(),team:data.team.split(",").map(x=>x.trim()).filter(Boolean),startDate:data.startDate||todayIso(),dueDate:data.dueDate||datePlus(30),brief:data.brief.trim(),initialTranscript:data.transcript.trim(),status:"intake",createdAt:new Date().toISOString(),lastUpdated:new Date().toISOString(),extractedItems:[],stories:[],risks:[],updates:[],proposals:[],decisions:[],planProposal:null,history:[]};
+ db.projects.unshift(p);saveDb();activeProjectId=p.id;activeTab="overview";page="project";modalOpen=false;renderShell();
 }
-
-function sourcesView() {
-  const p = state.project;
-  const rows = p.sources.map(s => `<div class="project-row"><div><div class="project-title">${esc(s.title)} <span class="badge blue">${esc(KIND[s.kind] || s.kind)}</span></div><div class="project-sub">${s.original_filename ? esc(s.original_filename) + " · " : ""}${fmtDateTime(s.created_at)} · ${esc(s.phase)}</div></div><button class="btn btn-secondary btn-small" data-action="view-source" data-id="${s.id}">View text</button></div>`).join("");
-  return `<div class="page-head"><div><div class="eyebrow">US01</div><h1>Sources</h1><p>Brief and transcripts. Only extracted text is stored (.txt, .md, .docx, .pdf up to 5 MB).</p></div>${isPM() ? '<button class="btn btn-primary" data-action="modal" data-modal="add-source">＋ Add source</button>' : ""}</div><section class="card"><div class="card-body"><div class="project-list">${rows}</div></div></section>`;
+function detectType(line){const t=line.toLowerCase();if(/risk|delay|block|concern|issue|depend|late/.test(t))return"Risk signal";if(/decid|agreed|approved/.test(t))return"Decision";if(/must|shall|required|need to|should/.test(t))return"Requirement";if(/todo|action|follow up|owner|assign/.test(t))return"Action item";return"Feature";}
+function processIntake(p){
+ const sources=[{label:"Project brief",text:p.brief}];if(p.initialTranscript)sources.push({label:"Initial transcript",text:p.initialTranscript});
+ const items=[];sources.forEach(src=>src.text.split(/\n+|(?<=[.!?])\s+/).map(x=>x.trim().replace(/^[-*•\d.)\s]+/,"")).filter(x=>x.length>18).slice(0,6).forEach(line=>items.push({id:uid("item"),text:line,sourceLabel:src.label,sourceExcerpt:line,type:detectType(line),confidence:0.72,status:"draft"})));
+ if(!items.length)items.push({id:uid("item"),text:p.goal||"Deliver the project goal described in the brief.",sourceLabel:"Project brief",sourceExcerpt:p.brief,type:"Feature",confidence:0.65,status:"draft"});
+ p.extractedItems=items;p.status="scope_review";touch(p);saveDb();renderShell();
 }
-
-function availability(m) {
-  if (!m.available_from && !m.available_to) return "Always available";
-  return fmtDate(m.available_from) + " → " + fmtDate(m.available_to);
+function resolveItem(pid,iid,action){
+ const p=projectById(pid);if(!p)return;const i=p.extractedItems.find(x=>x.id===iid);if(!i)return;
+ if(action==="edit"){const v=prompt("Edit the extracted item",i.text);if(v===null)return;i.text=v.trim()||i.text;}
+ i.status=action==="approve"||action==="edit"?"approved":"rejected";touch(p);saveDb();renderShell();
 }
-
-function teamView() {
-  const leader = state.team.find(m => m.is_leader);
-  const rows = state.team.map(m => `<div class="project-row"><div><div class="project-title">${esc(m.name)} ${m.is_leader ? '<span class="badge green">Team Leader</span>' : ""}</div><div class="project-sub">${esc(m.role_title || "No role title")} · ${esc(m.capacity_hours_per_week)} h/week · ${availability(m)}</div><div class="row-meta">${(m.skills || []).map(s => `<span class="badge blue">${esc(s)}</span>`).join("")}${m.user_email ? `<span class="subtle">Login: ${esc(m.user_email)}</span>` : ""}</div></div>${isPM() ? `<div class="item-actions" style="margin:0"><button class="btn btn-secondary btn-small" data-action="edit-member" data-id="${m.id}">Edit</button><button class="btn btn-danger btn-small" data-action="delete-member" data-id="${m.id}">Delete</button></div>` : ""}</div>`).join("");
-  const tools = isPM() ? `<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-primary" data-action="modal" data-modal="member">＋ Add member</button><button class="btn btn-secondary" data-action="modal" data-modal="import-csv">Import CSV</button><button class="btn btn-secondary" data-action="open-leader">Set Team Leader</button>${leader ? '<button class="btn btn-quiet" data-action="remove-leader">Remove leader</button>' : ""}</div>` : "";
-  return `<div class="page-head"><div><div class="eyebrow">US01</div><h1>Team</h1><p>Members and weekly capacity. A linked Team Leader can see this project.</p></div>${tools}</div><section class="card"><div class="card-body">${state.team.length ? `<div class="project-list">${rows}</div>` : '<div class="empty"><div class="empty-icon">☺</div><h3>No team members yet</h3><p>Add members one by one or import a CSV.</p></div>'}</div></section>`;
+function analyzeInitialRisks(p){
+ const words=(p.brief+" "+p.initialTranscript).toLowerCase(), terms=["risk","delay","block","uncertain","dependency","deadline","budget","security","integration"], found=terms.filter(w=>words.includes(w));
+ if(found.length){const score=found.length>=2?16:9;p.risks.push({id:uid("risk"),title:"Kickoff risk signal: "+found.slice(0,3).join(", "),description:"Rule-based signal from kickoff text. Review evidence and assess likelihood and impact.",score:score,severity:score>=15?"High":"Medium",status:"open",source:"Kickoff brief/transcript"});}
 }
-
-/* ---------- modals ---------- */
-function modalShell(title, subtitle, formName, body, submitLabel) {
-  return `<div class="modal-backdrop" data-action="backdrop-close"><section class="modal" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>${esc(title)}</h2>${subtitle ? `<p>${esc(subtitle)}</p>` : ""}</div><button type="button" class="close-x" data-action="close-modal">×</button></div><form data-form="${formName}"><div class="modal-body">${body}<p id="modal-error" class="callout warning" style="white-space:pre-wrap" hidden></p></div><div class="modal-foot"><button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button><button type="submit" class="btn btn-primary">${esc(submitLabel)}</button></div></form></section></div>`;
+function approveScope(p){
+ const approved=(p.extractedItems||[]).filter(i=>i.status==="approved");if(!approved.length){alert("Approve at least one evidence item first.");return;}
+ p.stories=approved.slice(0,8).map(item=>({id:uid("story"),title:"As a user, deliver: "+item.text.slice(0,95),description:"Generated from approved "+item.type.toLowerCase()+" evidence.",sourceItemId:item.id,tasks:[{id:uid("task"),title:"Implement and review: "+item.text.slice(0,75),status:"Not started",owner:""}]}));
+ p.planProposal={id:uid("proposal"),title:"Approve the initial project plan",description:"Review "+p.stories.length+" proposed story/stories, target date "+prettyDate(p.dueDate)+", team availability and the initial risk register.",status:"pending",priority:"Review",createdAt:new Date().toISOString(),version:1};
+ p.status="plan_review";analyzeInitialRisks(p);touch(p);saveDb();activeTab="decisions";renderShell();
 }
-
-function modalView() {
-  const m = state.modal, p = state.project;
-  if (m.type === "create-project") return modalShell("Create a project", "Start with a brief. A kickoff transcript is optional.", "create-project",
-    `<div class="form-grid">${field("Project name *", '<input name="name" required maxlength="200">')}${field("Goal", '<input name="goal">')}${field("Start date", '<input name="start_date" type="date">')}${field("Target end date", '<input name="end_date" type="date">')}${field("Project brief *", '<textarea name="brief" required></textarea>', true)}${field("Kickoff transcript (optional, pasted)", '<textarea name="transcript"></textarea>', true)}${field("Or upload a transcript file (.txt .md .docx .pdf, max 5 MB)", '<input name="transcriptFile" type="file" accept=".txt,.md,.docx,.pdf">', true)}</div>`, "Create project");
-  if (m.type === "edit-project") return modalShell("Edit project", "", "edit-project",
-    `<div class="form-grid">${field("Project name *", `<input name="name" required maxlength="200" value="${esc(p.name)}">`)}${field("Goal", `<input name="goal" value="${esc(p.goal || "")}">`)}${field("Start date", `<input name="start_date" type="date" value="${esc(p.start_date || "")}">`)}${field("Target end date", `<input name="end_date" type="date" value="${esc(p.end_date || "")}">`)}${field("Project brief *", `<textarea name="brief" required>${esc(p.brief || "")}</textarea>`, true)}</div>`, "Save changes");
-  if (m.type === "add-source") return modalShell("Add a source", "Paste text or upload one file.", "add-source",
-    `<div class="form-grid">${field("Type", '<select name="kind"><option value="transcript">Transcript</option><option value="note">Note</option><option value="file">Other file</option></select>')}${field("Title (optional)", '<input name="title" maxlength="255">')}${field("Pasted text", '<textarea name="text"></textarea>', true)}${field("Or file (.txt .md .docx .pdf, max 5 MB)", '<input name="file" type="file" accept=".txt,.md,.docx,.pdf">', true)}</div>`, "Add source");
-  if (m.type === "view-source") return `<div class="modal-backdrop" data-action="backdrop-close"><section class="modal"><div class="modal-head"><div><h2>${esc(m.source.title)}</h2><p>${esc(KIND[m.source.kind] || m.source.kind)} · ${m.source.content_length} characters</p></div><button type="button" class="close-x" data-action="close-modal">×</button></div><div class="modal-body"><div style="white-space:pre-wrap;font-size:13px">${esc(m.source.content_text)}</div></div></section></div>`;
-  if (m.type === "member") { const x = m.member || {}; return modalShell(m.member ? "Edit team member" : "Add team member", "", "member",
-    `<div class="form-grid">${field("Name *", `<input name="name" required maxlength="120" value="${esc(x.name || "")}">`)}${field("Role title", `<input name="role_title" maxlength="120" value="${esc(x.role_title || "")}">`)}${field("Skills (separate with ; or ,)", `<input name="skills" value="${esc((x.skills || []).join("; "))}">`, true)}${field("Capacity (hours / week)", `<input name="capacity" type="number" min="0" max="168" step="0.5" required value="${esc(x.capacity_hours_per_week != null ? x.capacity_hours_per_week : 40)}">`)}${field("&nbsp;", "")}${field("Available from", `<input name="available_from" type="date" value="${esc(x.available_from || "")}">`)}${field("Available to", `<input name="available_to" type="date" value="${esc(x.available_to || "")}">`)}</div>`, m.member ? "Save" : "Add member"); }
-  if (m.type === "import-csv") return modalShell("Import team from CSV", "All rows are validated first; if any row is invalid nothing is saved.", "import-csv",
-    `<div class="callout">Columns: <b>name</b> (required), role_title, skills (separated by <b>;</b>), capacity_hours_per_week, available_from, available_to (YYYY-MM-DD).</div>${field("CSV file (UTF-8)", '<input name="file" type="file" accept=".csv" required>')}`, "Import");
-  if (m.type === "leader") {
-    const members = state.team.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join("");
-    const users = state.leaders.map(u => `<option value="${esc(u.email)}">${esc(u.name)} (${esc(u.email)})</option>`).join("");
-    if (!members || !users) return modalShell("Set Team Leader", "", "none", `<div class="callout warning">${!members ? "Add at least one team member first." : "No users with the TEAM_LEADER role exist."}</div>`, "OK");
-    return modalShell("Set Team Leader", "The linked user gets read access to this project.", "leader",
-      `<div class="form-grid">${field("Team member", `<select name="member_id">${members}</select>`)}${field("Team Leader login", `<select name="user_email">${users}</select>`)}</div>`, "Assign");
-  }
-  return "";
+function decide(pid,xid,choice){
+ const p=projectById(pid);if(!p)return;let x=p.planProposal&&p.planProposal.id===xid?p.planProposal:(p.proposals||[]).find(y=>y.id===xid);if(!x)return;
+ let note="";if(choice==="modify"||choice==="request-info"){note=prompt(choice==="modify"?"Describe the PM modification to apply.":"What information should the team provide?","")||"";if(!note)return;}
+ x.decision=choice;x.decisionNote=note;x.decidedAt=new Date().toISOString();
+ if(choice==="approve"||choice==="modify"){x.status="approved";x.version=(x.version||0)+1;if(x===p.planProposal)p.status="ready";}
+ else if(choice==="request-info")x.status="information requested";else x.status=choice==="defer"?"deferred":"rejected";
+ p.decisions.push({id:uid("decision"),proposalId:x.id,choice:choice,note:note,createdAt:new Date().toISOString()});touch(p);saveDb();renderShell();
 }
-
-/* ---------- render ---------- */
-function render() {
-  const notice = state.notice; state.notice = null;
-  const body = state.page === "project" && state.project ? projectView() : portfolioView();
-  app.innerHTML = `<div class="app-shell">${sidebar()}<div class="main-area">${topbar()}<main class="content">${notice ? noticeHtml(notice) : ""}${body}</main></div></div>${state.modal ? modalView() : ""}`;
+function startExecution(p){if(!p.planProposal||p.planProposal.status!=="approved"){alert("The PM must approve the plan before execution starts.");return;}p.status="active";p.executionStartedAt=new Date().toISOString();touch(p);saveDb();activeTab="overview";renderShell();}
+function submitUpdate(form){
+ const p=projectById(activeProjectId);if(!p||p.status!=="active")return;
+ const d=new FormData(form),u={id:uid("event"),type:String(d.get("type")),author:String(d.get("author")||"Team Leader").trim(),text:String(d.get("text")).trim(),date:new Date().toISOString(),status:"logged"};p.updates.push(u);
+ if(u.type==="blocker"){p.risks.unshift({id:uid("risk"),title:"Runtime blocker reported",description:u.text,score:20,severity:"High",status:"open",source:"Team Leader update"});p.proposals.push({id:uid("proposal"),title:"Review a critical blocker",description:u.text,status:"pending",priority:"Critical",createdAt:new Date().toISOString(),sourceEventId:u.id});}
+ if(u.type==="change")p.proposals.push({id:uid("proposal"),title:"Team Leader change proposal",description:u.text,status:"pending",priority:"Review",createdAt:new Date().toISOString(),sourceEventId:u.id});
+ touch(p);saveDb();activeTab="updates";renderShell();
 }
-
-function showModalError(msg) {
-  const el = document.getElementById("modal-error");
-  if (el) { el.textContent = msg; el.hidden = false; el.scrollIntoView({ block: "nearest" }); }
-  else { state.notice = { type: "error", text: msg }; render(); }
+function setTaskStatus(pid,sid,tid,status){
+ const p=projectById(pid);if(!p)return;const s=p.stories.find(x=>x.id===sid);if(!s)return;const t=s.tasks.find(x=>x.id===tid);if(!t)return;t.status=status;
+ if(status==="Blocked"){p.risks.unshift({id:uid("risk"),title:"Task blocked: "+t.title,description:"Review schedule impact and mitigation.",score:16,severity:"High",status:"open",source:"Task status"});p.proposals.push({id:uid("proposal"),title:"Review blocked task",description:t.title,status:"pending",priority:"Critical",createdAt:new Date().toISOString()});}
+ touch(p);saveDb();renderShell();
 }
-function closeModal() { state.modal = null; render(); }
-
-/* ---------- actions (clicks) ---------- */
-const actions = {
-  "toggle-nav": () => { state.navOpen = !state.navOpen; render(); },
-  "logout": () => logout(),
-  "go-portfolio": async () => { await reloadProjects(); state.page = "portfolio"; state.project = null; state.navOpen = false; render(); },
-  "open-project": t => openProject(Number(t.dataset.id)),
-  "tab": t => { state.tab = t.dataset.tab; render(); },
-  "modal": t => { state.modal = { type: t.dataset.modal }; render(); },
-  "close-modal": closeModal,
-  "backdrop-close": (t, ev) => { if (ev.target === t) closeModal(); },
-  "view-source": async t => {
-    const s = await api(`/projects/${state.project.id}/sources/${t.dataset.id}`);
-    state.modal = { type: "view-source", source: s }; render();
-  },
-  "edit-member": t => { state.modal = { type: "member", member: state.team.find(m => m.id === Number(t.dataset.id)) }; render(); },
-  "delete-member": async t => {
-    const m = state.team.find(x => x.id === Number(t.dataset.id));
-    if (!m || !confirm(`Delete ${m.name} from this project?`)) return;
-    await api(`/projects/${state.project.id}/team/${m.id}`, { method: "DELETE" });
-    await reloadProject(); state.notice = { type: "ok", text: "Team member deleted." }; render();
-  },
-  "open-leader": async () => { state.leaders = await api("/users/team-leaders"); state.modal = { type: "leader" }; render(); },
-  "remove-leader": async () => {
-    if (!confirm("Remove the Team Leader from this project? They will lose access.")) return;
-    await api(`/projects/${state.project.id}/leader`, { method: "DELETE" });
-    await reloadProject(); state.notice = { type: "ok", text: "Team Leader removed." }; render();
-  },
-};
-
-/* ---------- submitters (forms) ---------- */
-const nul = v => (v && String(v).trim() ? String(v).trim() : null);
-
-const submitters = {
-  "create-project": async form => {
-    const d = new FormData(form), file = form.elements.transcriptFile.files[0];
-    if (file && file.size > MAX_UPLOAD) throw new Error("The transcript file is larger than 5 MB.");
-    const project = await post("/projects", { name: d.get("name"), goal: nul(d.get("goal")), start_date: nul(d.get("start_date")), end_date: nul(d.get("end_date")), brief: d.get("brief"), transcript: nul(d.get("transcript")) });
-    let notice = { type: "ok", text: "Project created." };
-    if (file) {
-      try { await uploadSource(project.id, { kind: "transcript", file }); notice = { type: "ok", text: "Project created and transcript file saved." }; }
-      catch (e) { notice = { type: "warn", text: "Project created, but the transcript file was rejected: " + e.message }; }
-    }
-    state.modal = null; await reloadProjects(); state.notice = notice; await openProject(project.id);
-  },
-  "edit-project": async form => {
-    const d = new FormData(form);
-    state.project = Object.assign(state.project, await patch(`/projects/${state.project.id}`, { name: d.get("name"), goal: nul(d.get("goal")), start_date: nul(d.get("start_date")), end_date: nul(d.get("end_date")), brief: d.get("brief") }));
-    await reloadProjects(); state.modal = null; state.notice = { type: "ok", text: "Project updated." }; render();
-  },
-  "add-source": async form => {
-    const d = new FormData(form), file = form.elements.file.files[0];
-    if (file && file.size > MAX_UPLOAD) throw new Error("The file is larger than 5 MB.");
-    await uploadSource(state.project.id, { kind: d.get("kind"), title: nul(d.get("title")), text: nul(d.get("text")), file });
-    await reloadProject(); state.modal = null; state.notice = { type: "ok", text: "Source added." }; render();
-  },
-  "member": async form => {
-    const d = new FormData(form), cap = parseFloat(d.get("capacity"));
-    if (Number.isNaN(cap)) throw new Error("Capacity must be a number.");
-    const body = { name: d.get("name"), role_title: nul(d.get("role_title")), skills: String(d.get("skills") || "").split(/[;,]/).map(s => s.trim()).filter(Boolean), capacity_hours_per_week: cap, available_from: nul(d.get("available_from")), available_to: nul(d.get("available_to")) };
-    const existing = state.modal.member, base = `/projects/${state.project.id}/team`;
-    if (existing) await patch(`${base}/${existing.id}`, body); else await post(base, body);
-    await reloadProject(); state.modal = null; state.notice = { type: "ok", text: existing ? "Team member updated." : "Team member added." }; render();
-  },
-  "import-csv": async form => {
-    const file = form.elements.file.files[0];
-    if (!file) throw new Error("Choose a CSV file.");
-    const fd = new FormData(); fd.append("file", file);
-    const created = await api(`/projects/${state.project.id}/team/import`, { method: "POST", body: fd });
-    await reloadProject(); state.modal = null; state.notice = { type: "ok", text: `Imported ${created.length} team member(s).` }; render();
-  },
-  "leader": async form => {
-    const d = new FormData(form);
-    await api(`/projects/${state.project.id}/leader`, { method: "PUT", body: JSON.stringify({ member_id: Number(d.get("member_id")), user_email: d.get("user_email") }) });
-    await reloadProject(); state.modal = null; state.notice = { type: "ok", text: "Team Leader linked to the project." }; render();
-  },
-  "none": async () => closeModal(),
-};
-
-app.addEventListener("click", async ev => {
-  const t = ev.target.closest("[data-action]");
-  if (!t || !actions[t.dataset.action]) return;
-  try { await actions[t.dataset.action](t, ev); }
-  catch (e) { if (e.message !== "unauthorized") { state.notice = { type: "error", text: e.message }; render(); } }
-});
-
-app.addEventListener("submit", async ev => {
-  const form = ev.target.closest("form[data-form]");
-  if (!form) return;
-  ev.preventDefault();
-  const btn = form.querySelector('button[type="submit"]');
-  if (btn) btn.disabled = true;
-  try { await submitters[form.dataset.form](form); }
-  catch (e) { if (e.message !== "unauthorized") { showModalError(e.message); if (btn) btn.disabled = false; } }
-});
-
-/* ---------- boot ---------- */
-(async function init() {
-  try {
-    state.me = await api("/auth/me");
-    await reloadProjects();
-    render();
-  } catch (e) {
-    if (e.message !== "unauthorized") app.innerHTML = `<div style="max-width:480px;margin:12vh auto;font-family:system-ui"><h2>Cannot load NEXUS</h2><p>${esc(e.message)}</p><button onclick="location.reload()">Retry</button></div>`;
-  }
-})();
+function downloadReport(pid){
+ const p=projectById(pid);if(!p)return;const report={generatedAt:new Date().toISOString(),project:{name:p.name,goal:p.goal,owner:p.owner,status:p.status,startDate:p.startDate,dueDate:p.dueDate,team:p.team},progress:progressOf(p),stories:p.stories,risks:p.risks,updates:p.updates,decisions:p.decisions};
+ const blob=new Blob([JSON.stringify(report,null,2)],{type:"application/json"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=(p.name||"project").toLowerCase().replace(/[^a-z0-9]+/g,"-")+"-report.json";a.click();URL.revokeObjectURL(url);
+}
+function handleClick(event){
+ const t=event.target.closest("[data-action]");if(!t)return;const a=t.dataset.action;
+ if(a==="navigate"){page=t.dataset.page;mobileNavOpen=false;renderShell();}
+ if(a==="toggle-nav"){mobileNavOpen=!mobileNavOpen;renderShell();}
+ if(a==="show-create"){modalOpen=true;renderShell();}
+ if(a==="close-modal"){modalOpen=false;renderShell();}
+ if(a==="backdrop-close"&&event.target===t){modalOpen=false;renderShell();}
+ if(a==="open-project"){activeProjectId=t.dataset.id;page="project";activeTab="overview";mobileNavOpen=false;renderShell();}
+ if(a==="project-tab"){activeTab=t.dataset.tab;renderShell();}
+ if(a==="process-intake"){const p=projectById(t.dataset.id);if(p)processIntake(p);}
+ if(["item-approve","item-edit","item-reject"].includes(a))resolveItem(t.dataset.id,t.dataset.item,a.replace("item-",""));
+ if(a==="approve-scope"){const p=projectById(t.dataset.id);if(p)approveScope(p);}
+ if(a==="decision")decide(t.dataset.id,t.dataset.proposal,t.dataset.choice);
+ if(a==="start-execution"){const p=projectById(t.dataset.id);if(p)startExecution(p);}
+ if(a==="complete-project"){const p=projectById(t.dataset.id);if(p){p.status="completed";touch(p);saveDb();renderShell();}}
+ if(a==="download-report")downloadReport(t.dataset.id);
+}
+async function handleSubmit(event){
+ const form=event.target.closest("form[data-form]");if(!form)return;event.preventDefault();
+ if(form.dataset.form==="create-project"){
+  const d=new FormData(form);let transcript=String(d.get("transcript")||"");const file=form.querySelector('[name="transcriptFile"]').files[0];
+  if(file){try{transcript=transcript?transcript+"\n\n"+await file.text():await file.text();}catch(_){alert("Could not read this TXT file.");return;}}
+  createProject({name:d.get("name"),owner:d.get("owner"),goal:d.get("goal"),team:d.get("team")||"",startDate:d.get("startDate"),dueDate:d.get("dueDate"),brief:d.get("brief"),transcript:transcript});
+ }
+ if(form.dataset.form==="team-update")submitUpdate(form);
+}
+function handleChange(event){
+ const t=event.target;if(t.matches('select[data-action="task-status"]'))setTaskStatus(t.dataset.project,t.dataset.story,t.dataset.task,t.value);
+}
+app.addEventListener("click",handleClick);
+app.addEventListener("submit",handleSubmit);
+app.addEventListener("change",handleChange);
+renderShell();

@@ -1,44 +1,46 @@
-import jwt
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import jwt
 from sqlalchemy.orm import Session
-
-from app.auth.security import decode_access_token
-from app.db.models import ProjectMember, User
+from app.config import settings
+from app.db.models import User, ProjectMember
 from app.db.session import get_db
 
-bearer_scheme = HTTPBearer(auto_error=False)
+security_scheme = HTTPBearer()
 
 
 def get_current_user(
-    creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
     db: Session = Depends(get_db),
 ) -> User:
-    unauthorized = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Not authenticated",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    if creds is None:
-        raise unauthorized
+    token = credentials.credentials
     try:
-        payload = decode_access_token(creds.credentials)
-        user_id = int(payload["sub"])
-    except (jwt.PyJWTError, KeyError, ValueError):
-        raise unauthorized
-    user = db.get(User, user_id)
+        payload = jwt.decode(
+            token, settings.jwt_secret, algorithms=[settings.jwt_algorithm]
+        )
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED, "Invalid authentication token"
+            )
+    except jwt.PyJWTError:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, "Invalid authentication token"
+        )
+
+    user = db.get(User, int(user_id))
     if user is None:
-        raise unauthorized
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
     return user
 
 
 def require_role(*roles: str):
-    def checker(user: User = Depends(get_current_user)) -> User:
+    def dependency(user: User = Depends(get_current_user)) -> User:
         if user.role not in roles:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Insufficient role")
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Permission denied")
         return user
 
-    return checker
+    return dependency
 
 
 def require_project_access(
@@ -48,7 +50,7 @@ def require_project_access(
 ) -> User:
     if user.role == "PM":
         return user
-    member = db.get(ProjectMember, (project_id, user.id))
-    if member is None:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "No access to this project")
+    link = db.get(ProjectMember, (project_id, user.id))
+    if link is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Access to project denied")
     return user

@@ -5,7 +5,7 @@ from pathlib import Path
 from app.llm.runner import StructuredRun, run_structured
 from app.schemas.extraction import ExtractionOutput
 from app.services.injection_guard import detect_injection, wrap_untrusted
-
+from app.services.quotes import VerifiedRequirement, verify_requirements
 log = logging.getLogger("nexus.agent1")
 
 PROMPT_VERSION = "agent1_extract_v1"
@@ -43,3 +43,9 @@ def extract_requirements(*, project_id: int, sources: list[dict], job_id: int | 
         messages=build_messages(sources),
         schema=ExtractionOutput,
     )
+
+
+def verify_extraction(output: ExtractionOutput, sources: list[dict]) -> list[VerifiedRequirement]:
+    """Check each quote against its own source; unverified items get a capped confidence. Pure, no DB."""
+    sources_by_id = {s["id"]: s["content_text"] for s in sources}
+    return verify_requirements(output.requirements, sources_by_id)

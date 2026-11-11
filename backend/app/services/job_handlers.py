@@ -16,3 +16,5 @@ def demo_echo(ctx: JobContext, params: dict) -> str:
         time.sleep(delay)
         ctx.heartbeat(progress=(i + 1) * 100 / steps)
     return f"echo:{params.get('message', '')}"[:255]
+
+import app.services.agent1_job  # noqa: E402,F401  (registers agent1.extract)

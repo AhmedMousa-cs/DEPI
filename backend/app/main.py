@@ -5,6 +5,7 @@ from app.api.auth import router as auth_router
 from app.api.graph import router as graph_router
 from app.api.jobs import router as jobs_router
 from app.api.projects import router as projects_router
+from app.api.review import router as review_router
 from app.api.sources import router as sources_router
 from app.api.team import router as team_router
 from app.api.users import router as users_router
@@ -23,6 +24,7 @@ app.include_router(sources_router)
 app.include_router(team_router)
 app.include_router(jobs_router)
 app.include_router(graph_router)
+app.include_router(review_router)
 
 
 @app.get("/health")

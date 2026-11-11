@@ -272,3 +272,50 @@ class AgentRun(Base):
     finished_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+
+class Requirement(Base):
+    __tablename__ = "requirements"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    type: Mapped[str] = mapped_column(String(20))
+    text: Mapped[str] = mapped_column(Text)
+    priority: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
+    source_id: Mapped[int | None] = mapped_column(
+        ForeignKey("sources.id", ondelete="SET NULL"), nullable=True
+    )
+    quote: Mapped[str | None] = mapped_column(Text, nullable=True)
+    quote_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    confidence: Mapped[float] = mapped_column(Float, default=0)
+    run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    created_by_agent: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    locked_by_pm: Mapped[bool] = mapped_column(Boolean, default=False)
+    pm_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class Decision(Base):
+    __tablename__ = "decisions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    subject_type: Mapped[str] = mapped_column(String(50))
+    subject_id: Mapped[int] = mapped_column(Integer)
+    decision: Mapped[str] = mapped_column(String(20))
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decided_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    decided_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

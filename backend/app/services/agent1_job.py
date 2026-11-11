@@ -12,6 +12,8 @@ from app.audit import write_audit
 from app.db.models import Job, Source
 from app.db.session import SessionLocal
 from app.services.jobs import JobContext, PermanentJobError, register
+from app.orchestrator.checkpoints import postgres_checkpointer
+from app.orchestrator.scope_gate import ScopeGate
 from app.services.requirements import save_draft_requirements
 
 log = logging.getLogger("nexus.agent1_job")
@@ -73,5 +75,10 @@ def run_agent1_extract(ctx: JobContext, params: dict) -> str:
             },
         )
         db.commit()
+    try:  # drafts are already saved; if this fails the PM can re-open the gate with POST /scope/open
+        with postgres_checkpointer() as saver:
+            ScopeGate(saver).open(project_id)
+    except Exception:  # noqa: BLE001
+        log.exception('could not open the scope gate for project %s', project_id)
     ctx.heartbeat(progress=100)
     return f"requirements_drafted:{len(created)}"[:255]

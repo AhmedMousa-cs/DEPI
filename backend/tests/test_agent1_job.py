@@ -104,3 +104,21 @@ def test_chunked_reports_progress_per_batch(monkeypatch):
     )
     assert result.batches == 2
     assert calls == [(1, 2), (2, 2)]
+
+import pytest as _pytest
+
+
+@_pytest.fixture(autouse=True)
+def _clean_scope_threads():
+    from app.orchestrator.checkpoints import postgres_checkpointer
+
+    def wipe():
+        with postgres_checkpointer() as saver:
+            delete = getattr(saver, "delete_thread", None)
+            if delete:
+                for i in range(1, 12):  # project ids restart from 1 after every test
+                    delete(f"project:{i}:scope")
+
+    wipe()
+    yield
+    wipe()

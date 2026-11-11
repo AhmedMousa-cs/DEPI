@@ -2,6 +2,7 @@
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from app.ingest.chunking import chunk_text
 from app.llm.runner import StructuredRun, run_structured
@@ -106,6 +107,7 @@ def extract_requirements_chunked(
     job_id: int | None = None,
     max_chars: int = MAX_CHARS_PER_CALL,
     overlap: int = CHUNK_OVERLAP,
+    on_batch: Callable[[int, int], None] | None = None,
 ) -> ChunkedExtraction:
     """Like extract_requirements, but safe for long sources. If one call fails the error propagates
     (calls that already finished stay recorded in agent_runs)."""
@@ -115,7 +117,7 @@ def extract_requirements_chunked(
     batches = build_batches(sources, max_chars=max_chars, overlap=overlap)
     runs: list[StructuredRun] = []
     collected: list[ExtractedRequirement] = []
-    for batch in batches:
+    for index, batch in enumerate(batches, start=1):
         run = run_structured(
             project_id=project_id,
             job_id=job_id,
@@ -126,6 +128,8 @@ def extract_requirements_chunked(
         )
         runs.append(run)
         collected.extend(run.parsed.requirements)
+        if on_batch is not None:
+            on_batch(index, len(batches))
     return ChunkedExtraction(dedupe_requirements(collected), runs, len(batches))
 
 

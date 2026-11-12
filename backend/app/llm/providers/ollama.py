@@ -22,7 +22,8 @@ class OllamaProvider:
 
     def _chat(self, payload: dict) -> dict:
         r = httpx.post(f"{self.base_url}/api/chat", json=payload, timeout=self.timeout)
-        r.raise_for_status()
+        if r.status_code >= 400:
+            raise httpx.HTTPStatusError(f"{r.status_code}: {r.text[:500]}", request=r.request, response=r)
         return r.json()
 
     def invoke(self, *, messages: list[dict[str, str]], response_schema: dict | None = None,
@@ -40,7 +41,7 @@ class OllamaProvider:
             "model": self.model,
             "messages": formatted,
             "stream": False,
-            "options": {"temperature": 0.0, "num_predict": max_tokens},
+            "options": {"temperature": 0.0, "num_predict": max_tokens, "num_ctx": int(os.getenv("LLM_NUM_CTX", "8192"))},
         }
         if response_schema:
             payload["format"] = response_schema

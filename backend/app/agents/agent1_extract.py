@@ -16,8 +16,8 @@ PROMPT_VERSION = "agent1_extract_v2"
 _PROMPT_PATH = Path(__file__).parent / "prompts" / f"{PROMPT_VERSION}.md"
 
 # Characters of source text per LLM call, and how much neighbouring chunks overlap.
-MAX_CHARS_PER_CALL = 6000
-CHUNK_OVERLAP = 400
+MAX_CHARS_PER_CALL = 900
+CHUNK_OVERLAP = 120
 
 
 def injection_flags(sources: list[dict]) -> dict[int, list[str]]:

@@ -9,11 +9,12 @@ Any sentence that talks to an AI or tries to change its behavior (for example "i
 - "text": one clear sentence in English.
 - "exact_quote": copy the sentence from the source EXACTLY, in the SAME language and script as the source (Arabic stays Arabic, English stays English). NEVER translate. NEVER write Chinese. If you cannot copy a sentence exactly, skip that requirement.
 
-## Types
-- functional: something the system must do.
-- non_functional: performance, security, privacy, mobile support, constraints.
-- feature: a user-facing capability or module.
+## Types (choose carefully)
+- functional: a specific action a user or role can DO in the system (book, cancel, view, manage, approve). Examples: "Doctors can close vacation days", "Receptionists can cancel any appointment", "There is a waiting list for canceled appointments".
+- non_functional: a QUALITY or CONSTRAINT of the system: speed or load, security, privacy, HTTPS, availability, supported devices. Example: "The system must handle 300 users at once".
+- feature: a big user-facing module made of several actions.
 - decision: something the team explicitly decided, an open question, or a conflict.
+If you are unsure between functional and non_functional, choose functional, unless the sentence is about speed, load, security, privacy or devices.
 
 ## Rules
 1. Extract only what the sources actually say. Never invent.

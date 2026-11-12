@@ -1,0 +1,23 @@
+{
+  "job_id": 15,
+  "date": "2026-11-12",
+  "project": "Campus Clinic Booking (Project A)",
+  "agent": "agent1_extract",
+  "model": "qwen2.5:3b",
+  "prompt_version": "agent1_extract_v2",
+  "chunk": {"max_chars": 900, "overlap": 120},
+  "items_extracted": 8,
+  "quote_verified": 6,
+  "quote_unverified": 2,
+  "quote_verified_but_wrong": 1,
+  "quote_verified_rate": 0.75,
+  "recall_estimate": 0.4,
+  "targets": {"recall": 0.7, "precision": 0.7, "quote_verified": 0.95},
+  "injection_item_dropped": true,
+  "notes": "Local 3B model is below target. Monthly-report item is marked verified but its quote is about payments. HTTPS item has a mismatched quote. Missing: SSO ok, but specialty booking, SMS/email, waiting list, 24h rule, conflict.",
+  "improvement_plan": [
+    "Try a stronger model via MODEL_LLM",
+    "Check that the quote supports the item text (similarity check)",
+    "Run real DeepEval metrics on Project A"
+  ]
+}

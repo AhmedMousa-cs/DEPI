@@ -12,12 +12,12 @@ from app.services.quotes import VerifiedRequirement, normalize, verify_requireme
 
 log = logging.getLogger("nexus.agent1")
 
-PROMPT_VERSION = "agent1_extract_v1"
+PROMPT_VERSION = "agent1_extract_v2"
 _PROMPT_PATH = Path(__file__).parent / "prompts" / f"{PROMPT_VERSION}.md"
 
 # Characters of source text per LLM call, and how much neighbouring chunks overlap.
-MAX_CHARS_PER_CALL = 6000
-CHUNK_OVERLAP = 400
+MAX_CHARS_PER_CALL = 900
+CHUNK_OVERLAP = 120
 
 
 def injection_flags(sources: list[dict]) -> dict[int, list[str]]:
@@ -127,7 +127,11 @@ def extract_requirements_chunked(
             schema=ExtractionOutput,
         )
         runs.append(run)
-        collected.extend(run.parsed.requirements)
+        for item in run.parsed.requirements:
+            if detect_injection(item.exact_quote) or detect_injection(item.text):
+                log.warning("dropped instruction-like item from project %s: %r", project_id, item.text[:80])
+                continue
+            collected.append(item)
         if on_batch is not None:
             on_batch(index, len(batches))
     return ChunkedExtraction(dedupe_requirements(collected), runs, len(batches))

@@ -1,0 +1,22 @@
+{
+  "date": "2026-11-12",
+  "project": "Campus Clinic Booking (Project A)",
+  "agent": "agent1_extract",
+  "model": "qwen2.5:3b",
+  "prompt_version": "agent1_extract_v2",
+  "chunk": {"max_chars": 900, "overlap": 120},
+  "items_extracted": 10,
+  "quote_verified": 7,
+  "quote_unverified": 3,
+  "quote_verified_rate": 0.7,
+  "recall_estimate": 0.55,
+  "targets": {"recall": 0.7, "precision": 0.7, "quote_verified": 0.95},
+  "injection_item_dropped": true,
+  "conflict_detected": true,
+  "notes": "Manual estimate, not DeepEval. Conflict quote does not point to the 24h/2h sentence. Some quotes have copy errors from the 3B model.",
+  "improvement_plan": [
+    "Try a stronger model via MODEL_LLM",
+    "Check that the quote supports the item text (similarity check)",
+    "Run real DeepEval metrics on Project A"
+  ]
+}

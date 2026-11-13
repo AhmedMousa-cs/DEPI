@@ -12,7 +12,7 @@
   "requirements_without_story": [100],
   "estimate_hours_distinct_values": 1,
   "dependencies_generated": 0,
-  "pm_decisions": {"stories_approved": 8, "stories_rejected": 1, "tasks_rejected_manual": 2},
+  "pm_decisions": {"stories_approved": 8, "stories_rejected": 1, "tasks_rejected": 1},
   "tests": {"backend_pytest_passed": 284},
   "notes": "Manual review, not DeepEval. Local 3B model gives every task 10h, creates no dependencies, misses one requirement, adds invented acceptance criteria, and turns a decision item into a story. Pipeline itself works end to end. A stronger model is needed for quality.",
   "improvement_plan": [

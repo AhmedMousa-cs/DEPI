@@ -1,0 +1,49 @@
+{
+  "golden": "project-b",
+  "version": 1,
+  "sources": [
+    {"source_id": 1, "kind": "brief", "file": "project-b-brief.md"},
+    {"source_id": 2, "kind": "transcript", "file": "project-b-transcript.txt"}
+  ],
+  "requirements": [
+    {"requirement_id": 1, "id": "B01", "type": "functional", "priority": "high", "text": "Customers can register and sign in with email or phone", "source_id": 1, "exact_quote": "Let customers order groceries online and choose a delivery slot."},
+    {"requirement_id": 2, "id": "B02", "type": "functional", "priority": "high", "text": "Customers can browse the product catalogue and search by name", "source_id": 2, "exact_quote": "I want to search for what I need and put it in a basket."},
+    {"requirement_id": 3, "id": "B03", "type": "functional", "priority": "high", "text": "Customers can place an order and choose a delivery slot", "source_id": 2, "exact_quote": "At checkout I want to pick a delivery slot."},
+    {"requirement_id": 4, "id": "B04", "type": "functional", "priority": "high", "text": "Customers can pay online by card or cash on delivery", "source_id": 2, "exact_quote": "I can pay by card online or cash when the order arrives."},
+    {"requirement_id": 5, "id": "B05", "type": "functional", "priority": "medium", "text": "Customers see order status updates from accepted to delivered", "source_id": 2, "exact_quote": "Customers must see the order status: accepted, packed, out for delivery and delivered."},
+    {"requirement_id": 6, "id": "B06", "type": "functional", "priority": "high", "text": "The manager can add, edit and remove products and stock levels", "source_id": 2, "exact_quote": "I need to add new products and change the stock every morning."},
+    {"requirement_id": 7, "id": "B07", "type": "functional", "priority": "medium", "text": "The manager can see a daily orders dashboard", "source_id": 2, "exact_quote": "only the manager can change products or see the daily numbers."},
+    {"requirement_id": 8, "id": "B08", "type": "non_functional", "priority": "high", "text": "Customer and payment data are protected; card data is never stored on our servers", "source_id": 2, "exact_quote": "Payment data must not be stored on our servers, and only the manager can change products."}
+  ],
+  "stories": [
+    {"ref": "S1", "requirement_id": 1, "text": "As a new customer I can register and sign in with my email or phone number", "match_terms": ["register", "sign in"], "acceptance_criteria": ["A new account is created with a valid email or phone.", "Signing in with wrong credentials shows an error."]},
+    {"ref": "S2", "requirement_id": 2, "text": "As a customer I can browse the catalogue and search for a product by name", "match_terms": ["catalogue", "search"], "acceptance_criteria": ["The catalogue lists products by category.", "Searching by name returns matching products."]},
+    {"ref": "S3", "requirement_id": 3, "text": "As a customer I can place an order and choose a delivery slot", "match_terms": ["order", "delivery slot"], "acceptance_criteria": ["An order can be placed from the cart.", "Only available delivery slots can be selected."]},
+    {"ref": "S4", "requirement_id": 4, "text": "As a customer I can pay by card online or choose cash on delivery", "match_terms": ["pay", "cash"], "acceptance_criteria": ["A card payment is confirmed before the order is accepted.", "Cash on delivery orders are marked as unpaid."]},
+    {"ref": "S5", "requirement_id": 5, "text": "As a customer I can see the status of my order until it is delivered", "match_terms": ["status", "delivered"], "acceptance_criteria": ["Each status change is visible on the order.", "The order ends in the delivered status."]},
+    {"ref": "S6", "requirement_id": 6, "text": "As a store manager I can add, edit and remove products and stock levels", "match_terms": ["product", "stock"], "acceptance_criteria": ["A product can be created and edited.", "Out-of-stock products are hidden from customers."]},
+    {"ref": "S7", "requirement_id": 7, "text": "As a store manager I can see a daily orders dashboard", "match_terms": ["dashboard", "daily"], "acceptance_criteria": ["The dashboard shows today's order totals.", "Pending orders are listed with their status."]},
+    {"ref": "S8", "requirement_id": 8, "text": "As the platform owner I ensure card data is never stored and access is role-based", "match_terms": ["payment", "role"], "acceptance_criteria": ["No card number is stored in the database.", "Only the manager can change products."]}
+  ],
+  "tasks": [
+    {"ref": "T1", "story_ref": "S1", "title": "Build account registration and login API", "match_terms": ["registration", "login"], "estimate_hours": 12, "depends_on": []},
+    {"ref": "T2", "story_ref": "S1", "title": "Build registration and login screens", "match_terms": ["screen", "login"], "estimate_hours": 10, "depends_on": ["T1"]},
+    {"ref": "T3", "story_ref": "S2", "title": "Build catalogue browsing and search API", "match_terms": ["catalogue", "search"], "estimate_hours": 12, "depends_on": []},
+    {"ref": "T4", "story_ref": "S2", "title": "Build catalogue browsing and search UI", "match_terms": ["catalogue", "ui"], "estimate_hours": 10, "depends_on": ["T3"]},
+    {"ref": "T5", "story_ref": "S3", "title": "Build cart and order placement service", "match_terms": ["cart", "order"], "estimate_hours": 16, "depends_on": ["T1", "T3"]},
+    {"ref": "T6", "story_ref": "S3", "title": "Build checkout and delivery slot selection UI", "match_terms": ["checkout", "slot"], "estimate_hours": 12, "depends_on": ["T5"]},
+    {"ref": "T7", "story_ref": "S4", "title": "Integrate card payment provider and cash on delivery", "match_terms": ["payment", "cash"], "estimate_hours": 16, "depends_on": ["T5"]},
+    {"ref": "T8", "story_ref": "S5", "title": "Build order status notifications and history", "match_terms": ["status", "notifications"], "estimate_hours": 10, "depends_on": ["T5"]},
+    {"ref": "T9", "story_ref": "S6", "title": "Build product and stock management API", "match_terms": ["product", "stock"], "estimate_hours": 14, "depends_on": []},
+    {"ref": "T10", "story_ref": "S6", "title": "Build manager product management screens", "match_terms": ["manager", "product"], "estimate_hours": 10, "depends_on": ["T9"]},
+    {"ref": "T11", "story_ref": "S7", "title": "Build daily orders dashboard and reporting endpoint", "match_terms": ["dashboard", "orders"], "estimate_hours": 12, "depends_on": ["T5", "T9"]},
+    {"ref": "T12", "story_ref": "S8", "title": "Implement role-based access control and payment data hardening", "match_terms": ["role", "payment"], "estimate_hours": 16, "depends_on": ["T1", "T7"]}
+  ],
+  "thresholds": {
+    "story_coverage": 0.9,
+    "story_recall": 0.7,
+    "task_recall": 0.6,
+    "acceptance_criteria": 1.0,
+    "total_hours_ratio": 0.5
+  }
+}

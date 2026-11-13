@@ -6,7 +6,7 @@ const MAX_UPLOAD = 5 * 1024 * 1024;
 const STATUS = { setup: "Setup", planning: "Planning", scope_review: "Scope review", plan_review: "Plan review", active: "Active", closed: "Closed" };
 const KIND = { brief: "Brief", transcript: "Transcript", note: "Note", file: "File" };
 
-const state = { me: null, projects: [], project: null, team: [], leaders: [], page: "portfolio", tab: "overview", modal: null, notice: null, navOpen: false, reqs: [], scope: null, reqFilter: "all", job: null };
+const state = { me: null, projects: [], project: null, team: [], leaders: [], page: "portfolio", tab: "overview", modal: null, notice: null, navOpen: false, reqs: [], scope: null, reqFilter: "all", job: null, stories: [], tasks: [], coverage: null, planFilter: "all", planJob: null };
 const app = document.getElementById("app");
 const isPM = () => state.me && state.me.role === "PM";
 
@@ -81,9 +81,9 @@ function portfolioView() {
 function projectView() {
   const p = state.project;
   const tabs = [["overview", "Overview"], ["sources", "Sources (" + p.sources.length + ")"], ["team", "Team (" + state.team.length + ")"]];
-  if (isPM()) tabs.push(["scope", "Scope review"]);
-  const later = ["Work plan (M5–M6)", "Updates (M7)", "Decisions (M8)"];
-  return `<div class="workspace-head"><div class="workspace-title"><div class="project-monogram">${esc((p.name || "P")[0].toUpperCase())}</div><div><h1>${esc(p.name)}</h1><p>${esc(p.goal || "No goal added")}</p></div></div><div style="display:flex;gap:8px;align-items:center">${statusBadge(p.status)}${isPM() ? '<button class="btn btn-secondary btn-small" data-action="modal" data-modal="edit-project">Edit project</button>' : ""}</div></div><div class="tabs">${tabs.map(t => `<button class="${state.tab === t[0] ? "active" : ""}" data-action="tab" data-tab="${t[0]}">${esc(t[1])}</button>`).join("")}${later.map(l => `<button disabled style="opacity:.45;cursor:not-allowed" title="Not available yet">${esc(l)}</button>`).join("")}</div>${state.tab === "sources" ? sourcesView() : state.tab === "team" ? teamView() : state.tab === "scope" ? scopeView() : overviewView()}`;
+  if (isPM()) tabs.push(["scope", "Scope review"], ["plan", "Work plan"]);
+  const later = ["Updates (M7)", "Decisions (M8)"];
+  return `<div class="workspace-head"><div class="workspace-title"><div class="project-monogram">${esc((p.name || "P")[0].toUpperCase())}</div><div><h1>${esc(p.name)}</h1><p>${esc(p.goal || "No goal added")}</p></div></div><div style="display:flex;gap:8px;align-items:center">${statusBadge(p.status)}${isPM() ? '<button class="btn btn-secondary btn-small" data-action="modal" data-modal="edit-project">Edit project</button>' : ""}</div></div><div class="tabs">${tabs.map(t => `<button class="${state.tab === t[0] ? "active" : ""}" data-action="tab" data-tab="${t[0]}">${esc(t[1])}</button>`).join("")}${later.map(l => `<button disabled style="opacity:.45;cursor:not-allowed" title="Not available yet">${esc(l)}</button>`).join("")}</div>${state.tab === "sources" ? sourcesView() : state.tab === "team" ? teamView() : state.tab === "scope" ? scopeView() : state.tab === "plan" ? planView() : overviewView()}`;
 }
 
 function overviewView() {
@@ -142,7 +142,7 @@ function modalView() {
 function render() {
   const notice = state.notice; state.notice = null;
   const body = state.page === "project" && state.project ? projectView() : portfolioView();
-  app.innerHTML = `<div class="app-shell">${sidebar()}<div class="main-area">${topbar()}<main class="content">${notice ? noticeHtml(notice) : ""}${body}</main></div></div>${state.modal ? (state.modal.type === "decide-req" ? scopeModal() : modalView()) : ""}`;
+  app.innerHTML = `<div class="app-shell">${sidebar()}<div class="main-area">${topbar()}<main class="content">${notice ? noticeHtml(notice) : ""}${body}</main></div></div>${state.modal ? (state.modal.type === "decide-req" ? scopeModal() : state.modal.type === "decide-story" || state.modal.type === "decide-task" ? planModal() : modalView()) : ""}`;
 }
 
 function showModalError(msg) {
@@ -347,6 +347,14 @@ Object.assign(actions, {
         if (active) { state.job = active; pollJob(active.id); }
       } catch (e) { if (e.message === "unauthorized") throw e; }
     }
+    if (t.dataset.tab === "plan") {
+      await reloadPlan();
+      try {
+        const jobs = await api(`/projects/${state.project.id}/jobs`);
+        const active = jobs.find(j => j.type === "agent2.plan" && ["queued", "running"].includes(j.status));
+        if (active) { state.planJob = active; pollPlanJob(active.id); }
+      } catch (e) { if (e.message === "unauthorized") throw e; }
+    }
     baseTab(t);
   },
   "scope-filter": t => { state.reqFilter = t.dataset.f; render(); },
@@ -384,5 +392,147 @@ Object.assign(submitters, {
     await post(`/projects/${state.project.id}/requirements/${m.req.id}/decision`, body);
     state.modal = null; await reloadScope();
     state.notice = { type: "ok", text: m.mode === "rejected" ? "Requirement rejected." : "Requirement updated." }; render();
+  },
+});
+
+/* ===== Work plan / Agent 2 (M5) ===== */
+let planTimer = null;
+
+async function reloadPlan() {
+  const id = state.project.id;
+  const [stories, tasks, coverage, reqs] = await Promise.all([
+    api(`/projects/${id}/stories`),
+    api(`/projects/${id}/tasks`),
+    api(`/projects/${id}/planning/coverage`),
+    api(`/projects/${id}/requirements`).catch(e => { if (e.message === "unauthorized") throw e; return []; }),
+  ]);
+  state.stories = stories; state.tasks = tasks; state.coverage = coverage; state.planReqs = reqs;
+}
+
+function pollPlanJob(id) {
+  clearInterval(planTimer);
+  const tick = async () => {
+    try {
+      const j = await api(`/jobs/${id}`);
+      state.planJob = j;
+      const finished = ["done", "failed", "cancelled", "waiting_for_pm"].includes(j.status);
+      if (finished) clearInterval(planTimer);
+      if (state.page === "project" && state.tab === "plan") {
+        if (finished) await reloadPlan();
+        if (!state.modal) render();
+      }
+    } catch (e) { clearInterval(planTimer); }
+  };
+  tick(); planTimer = setInterval(tick, 3000);
+}
+
+const planBadge = s => s === "approved" ? '<span class="badge green">Approved</span>' : s === "rejected" ? '<span class="badge" style="background:#fde8e8;color:#b00020">Rejected</span>' : '<span class="badge blue">Draft</span>';
+const planMatch = x => state.planFilter === "all" ? true : x.review_status === state.planFilter;
+const planStoryById = id => state.stories.find(s => s.id === Number(id));
+const planTaskById = id => state.tasks.find(t => t.id === Number(id));
+const reqLabel = id => { const r = (state.planReqs || []).find(x => x.id === id); return r ? r.text : "Requirement #" + id; };
+const taskLabel = id => { const t = planTaskById(id); return t ? t.title : "Task #" + id; };
+
+function planTaskRow(t) {
+  const deps = (t.depends_on || []).map(id => `<span class="badge">${esc(taskLabel(id))}</span>`).join(" ");
+  const actions = t.review_status === "draft"
+    ? `<div class="item-actions" style="margin:0"><button class="btn btn-primary btn-small" data-action="task-approve" data-id="${t.id}">Approve</button><button class="btn btn-secondary btn-small" data-action="task-edit" data-id="${t.id}">Edit</button><button class="btn btn-danger btn-small" data-action="task-reject" data-id="${t.id}">Reject</button></div>`
+    : "";
+  return `<div class="project-row" style="align-items:flex-start"><div style="flex:1;min-width:0"><div class="project-title">${esc(t.title)} ${planBadge(t.review_status)}</div><div class="row-meta"><span class="badge">${esc(t.estimate_hours)} h</span><span class="badge">${esc(t.status)}</span><span class="subtle">Confidence ${Math.round((Number(t.confidence) || 0) * 100)}%</span>${deps ? `<span class="subtle">Depends on:</span> ${deps}` : ""}</div>${t.pm_comment ? `<div class="subtle">PM: ${esc(t.pm_comment)}</div>` : ""}</div>${actions}</div>`;
+}
+
+function planStoryCard(s) {
+  const tasks = state.tasks.filter(t => t.story_id === s.id && planMatch(t));
+  const criteria = (s.acceptance_criteria || []).map(c => `<li>${esc(c)}</li>`).join("");
+  const actions = s.review_status === "draft"
+    ? `<div class="item-actions" style="margin:8px 0 0"><button class="btn btn-primary btn-small" data-action="story-approve" data-id="${s.id}">Approve</button><button class="btn btn-secondary btn-small" data-action="story-edit" data-id="${s.id}">Edit</button><button class="btn btn-danger btn-small" data-action="story-reject" data-id="${s.id}">Reject</button></div>`
+    : "";
+  const taskBlock = tasks.length ? `<div class="project-list" style="margin-top:10px">${tasks.map(planTaskRow).join("")}</div>` : '<p class="subtle" style="margin:10px 0 0">No tasks under this story (or hidden by the filter).</p>';
+  return `<div class="project-row" style="display:block;align-items:stretch"><div class="project-title">${esc(s.text)} ${planBadge(s.review_status)}</div><div class="row-meta"><span class="badge">Requirement #${s.requirement_id}</span><span class="subtle">Confidence ${Math.round((Number(s.confidence) || 0) * 100)}%</span></div><div class="subtle">${esc(reqLabel(s.requirement_id))}</div>${criteria ? `<ul style="margin:8px 0 0 18px;font-size:13px">${criteria}</ul>` : ""}${actions}${taskBlock}</div>`;
+}
+
+function coverageSection(c) {
+  const gaps = [];
+  if (c.requirements_without_story.length) gaps.push(`${c.requirements_without_story.length} approved requirement(s) without a story: ${c.requirements_without_story.map(id => "#" + id).join(", ")}`);
+  if (c.stories_without_tasks.length) gaps.push(`${c.stories_without_tasks.length} story(ies) without tasks: ${c.stories_without_tasks.map(id => "#" + id).join(", ")}`);
+  if (c.tasks_without_estimate.length) gaps.push(`${c.tasks_without_estimate.length} task(s) without a valid estimate: ${c.tasks_without_estimate.map(id => "#" + id).join(", ")}`);
+  if (c.dependency_cycles.length) gaps.push(`Dependency cycle(s): ${c.dependency_cycles.map(x => x.join(" → ")).join("; ")}`);
+  const gapHtml = gaps.length ? `<div class="callout warning">${gaps.map(esc).join("<br>")}</div>` : '<div class="callout">Every approved requirement has a story, every story has a task, and no dependency cycle exists.</div>';
+  return `<section class="card section-card"><h2>Coverage <span class="badge ${c.clean ? "green" : ""}">${c.clean ? "Clean" : "Needs review"}</span></h2><p class="section-intro">Deterministic checks over the saved plan. Nothing here is produced by the LLM.</p><div class="keyvals">${kv("Approved requirements", c.approved_requirements)}${kv("Stories", c.stories + " · " + c.approved_stories + " approved · " + c.unreviewed_stories + " to review")}${kv("Tasks", c.tasks + " · " + c.approved_tasks + " approved · " + c.unreviewed_tasks + " to review")}${kv("Total estimate", c.total_estimate_hours + " h")}</div>${gapHtml}</section>`;
+}
+
+function planView() {
+  const c = state.coverage || { approved_requirements: 0, requirements_without_story: [], stories: 0, approved_stories: 0, unreviewed_stories: 0, stories_without_tasks: [], tasks: 0, approved_tasks: 0, unreviewed_tasks: 0, tasks_without_estimate: [], total_estimate_hours: 0, dependency_cycles: [], clean: false };
+  const job = state.planJob;
+  const running = job && ["queued", "running"].includes(job.status);
+  const plannable = ["planning", "plan_review"].includes(state.project.status);
+  const jobLine = job ? `<div class="callout${job.status === "failed" ? " warning" : ""}">Planning job #${esc(job.id)}: <b>${esc(job.status)}</b> (${esc(job.progress)}%)${job.error ? "<br>" + esc(job.error) : ""}</div>` : "";
+  const counts = { all: state.stories.length, draft: 0, approved: 0, rejected: 0 };
+  state.stories.forEach(s => { if (counts[s.review_status] != null) counts[s.review_status]++; });
+  const chips = [["all", "All", counts.all], ["draft", "To review", counts.draft], ["approved", "Approved", counts.approved], ["rejected", "Rejected", counts.rejected]]
+    .map(f => `<button class="btn ${state.planFilter === f[0] ? "btn-primary" : "btn-secondary"} btn-small" data-action="plan-filter" data-f="${f[0]}">${f[1]} (${f[2]})</button>`).join(" ");
+  const stories = state.stories.filter(planMatch);
+  const list = stories.map(planStoryCard).join("");
+  const hint = !plannable ? `<p class="subtle">Agent 2 only runs after the scope is approved (project status: ${esc(state.project.status)}).</p>` : "";
+  return `<div class="page-head"><div><div class="eyebrow">US03</div><h1>Work plan</h1><p>Stories and tasks generated from approved requirements. The PM reviews every draft before it becomes the plan.</p></div><div><button class="btn btn-primary" data-action="run-plan"${running || !plannable ? " disabled" : ""}>${running ? "Planning..." : "Run Agent 2"}</button>${hint}</div></div>${jobLine}${coverageSection(c)}<div class="page-head" style="margin-top:18px"><div><h1 style="font-size:18px">Stories & tasks</h1><p>Approve, edit or reject every draft. Your decisions survive an Agent 2 re-run.</p></div></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin:12px 0">${chips}</div><section class="card"><div class="card-body">${list ? `<div class="project-list">${list}</div>` : '<div class="empty"><div class="empty-icon">◈</div><h3>No stories yet</h3><p>Approve the scope, then run Agent 2.</p></div>'}</div></section>`;
+}
+
+function planModal() {
+  const m = state.modal, x = m.item;
+  if (m.type === "decide-story") {
+    if (m.mode === "rejected")
+      return modalShell("Reject story", x.text, "decide-story", field("Reason *", '<textarea name="comment" required></textarea>', true), "Reject");
+    return modalShell("Edit story", "Your edit is saved as a PM decision and approves this story.", "decide-story",
+      `<div class="form-grid">${field("Story *", `<textarea name="text" required minlength="10" maxlength="500">${esc(x.text)}</textarea>`, true)}${field("Acceptance criteria * (one per line)", `<textarea name="criteria" required>${esc((x.acceptance_criteria || []).join("\n"))}</textarea>`, true)}${field("Comment *", '<textarea name="comment" required></textarea>', true)}</div>`, "Save & approve");
+  }
+  if (m.mode === "rejected")
+    return modalShell("Reject task", x.title, "decide-task", field("Reason *", '<textarea name="comment" required></textarea>', true), "Reject");
+  return modalShell("Edit task", "Your edit is saved as a PM decision and approves this task.", "decide-task",
+    `<div class="form-grid">${field("Task title *", `<input name="title" required minlength="5" maxlength="200" value="${esc(x.title)}">`)}${field("Estimate (hours) *", `<input name="estimate_hours" type="number" min="0.5" max="80" step="0.5" required value="${esc(x.estimate_hours)}">`)}${field("Comment *", '<textarea name="comment" required></textarea>', true)}</div>`, "Save & approve");
+}
+
+Object.assign(actions, {
+  "plan-filter": t => { state.planFilter = t.dataset.f; render(); },
+  "story-approve": async t => {
+    await post(`/projects/${state.project.id}/stories/${t.dataset.id}/decision`, { decision: "approved" });
+    await reloadPlan(); state.notice = { type: "ok", text: "Story approved." }; render();
+  },
+  "story-edit": t => { state.modal = { type: "decide-story", mode: "modified", item: planStoryById(t.dataset.id) }; render(); },
+  "story-reject": t => { state.modal = { type: "decide-story", mode: "rejected", item: planStoryById(t.dataset.id) }; render(); },
+  "task-approve": async t => {
+    await post(`/projects/${state.project.id}/tasks/${t.dataset.id}/decision`, { decision: "approved" });
+    await reloadPlan(); state.notice = { type: "ok", text: "Task approved." }; render();
+  },
+  "task-edit": t => { state.modal = { type: "decide-task", mode: "modified", item: planTaskById(t.dataset.id) }; render(); },
+  "task-reject": t => { state.modal = { type: "decide-task", mode: "rejected", item: planTaskById(t.dataset.id) }; render(); },
+  "run-plan": async () => {
+    if (!confirm("Run Agent 2? New draft stories and tasks will be generated from the approved requirements. PM decisions are kept.")) return;
+    const job = await post(`/projects/${state.project.id}/jobs`, { type: "agent2.plan" });
+    state.planJob = job; render(); pollPlanJob(job.id);
+  },
+});
+
+Object.assign(submitters, {
+  "decide-story": async form => {
+    const m = state.modal, d = new FormData(form);
+    const body = { decision: m.mode, comment: String(d.get("comment") || "").trim() };
+    if (m.mode === "modified") {
+      body.text = String(d.get("text") || "").trim();
+      body.acceptance_criteria = String(d.get("criteria") || "").split("\n").map(x => x.trim()).filter(Boolean);
+    }
+    await post(`/projects/${state.project.id}/stories/${m.item.id}/decision`, body);
+    state.modal = null; await reloadPlan();
+    state.notice = { type: "ok", text: m.mode === "rejected" ? "Story rejected." : "Story edited and approved." }; render();
+  },
+  "decide-task": async form => {
+    const m = state.modal, d = new FormData(form);
+    const body = { decision: m.mode, comment: String(d.get("comment") || "").trim() };
+    if (m.mode === "modified") {
+      body.title = String(d.get("title") || "").trim();
+      body.estimate_hours = Number(d.get("estimate_hours"));
+    }
+    await post(`/projects/${state.project.id}/tasks/${m.item.id}/decision`, body);
+    state.modal = null; await reloadPlan();
+    state.notice = { type: "ok", text: m.mode === "rejected" ? "Task rejected." : "Task edited and approved." }; render();
   },
 });

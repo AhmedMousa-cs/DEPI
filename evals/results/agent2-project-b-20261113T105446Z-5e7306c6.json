@@ -1,0 +1,49 @@
+{
+  "run_id": "5e7306c6a0204e0f940dd2e476f9d517",
+  "golden": "project-b",
+  "started_at": "2026-11-13T10:54:46.004017+00:00",
+  "git_commit": null,
+  "model": "openai/gpt-oss-120b",
+  "prompt_version": "agent2_plan_v1",
+  "mode": "llm",
+  "story_coverage": 1.0,
+  "story_recall": 1.0,
+  "task_recall": 0.9167,
+  "link_integrity": true,
+  "cycle_free": true,
+  "estimate_sanity": true,
+  "acceptance_criteria": true,
+  "task_granularity": true,
+  "total_hours": 114.0,
+  "total_hours_ratio": 0.24,
+  "schema_valid": true,
+  "errors": [],
+  "details": {
+    "requirements_without_story": [],
+    "stories": 8,
+    "tasks": 18,
+    "unmatched_stories": [],
+    "link_errors": [],
+    "cycle": null,
+    "expected_hours": 150.0
+  },
+  "passed": {
+    "story_coverage": true,
+    "story_recall": true,
+    "task_recall": true,
+    "acceptance_criteria": true,
+    "total_hours_ratio": true,
+    "link_integrity": true,
+    "cycle_free": true,
+    "estimate_sanity": true,
+    "task_granularity": true,
+    "schema_valid": true
+  },
+  "usage": {
+    "attempts": 1,
+    "input_tokens": 1984,
+    "output_tokens": 2218,
+    "cost_usd": "0",
+    "pricing_configured": false
+  }
+}

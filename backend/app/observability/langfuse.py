@@ -111,10 +111,18 @@ def get_tracer() -> Tracer:
 SCORE_VALUES = {"approved": 1.0, "modified": 0.5, "rejected": 0.0}
 
 
-def send_pm_score(*, trace_id: str | None, decision: str, requirement_id: int) -> bool:
+def send_pm_score(
+    *,
+    trace_id: str | None,
+    decision: str,
+    requirement_id: int | None = None,
+    subject_type: str = "requirement",
+    subject_id: int | None = None,
+) -> bool:
     """PM decision -> Langfuse score on the trace that produced the item. Best-effort, never raises."""
     if not trace_id:
         return False
+    identifier = subject_id if subject_id is not None else requirement_id
     try:
         lf = get_tracer()._lf()
         if lf is None:
@@ -124,7 +132,7 @@ def send_pm_score(*, trace_id: str | None, decision: str, requirement_id: int) -
             name="pm_decision",
             value=SCORE_VALUES[decision],
             data_type="NUMERIC",
-            comment=f"requirement:{requirement_id}",
+            comment=f"{subject_type}:{identifier}",
         )
         return True
     except Exception as exc:  # noqa: BLE001

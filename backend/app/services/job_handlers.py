@@ -18,3 +18,4 @@ def demo_echo(ctx: JobContext, params: dict) -> str:
     return f"echo:{params.get('message', '')}"[:255]
 
 import app.services.agent1_job  # noqa: E402,F401  (registers agent1.extract)
+import app.services.agent2_job  # noqa: E402,F401  (registers agent2.plan)

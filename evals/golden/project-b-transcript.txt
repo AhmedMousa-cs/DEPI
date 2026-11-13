@@ -1,0 +1,14 @@
+PM: GreenCart wants a simple online store for groceries with delivery inside the city.
+
+Store manager: I need to add new products and change the stock every morning. If an item
+is out of stock I want it hidden from customers right away.
+
+Customer: I want to search for what I need and put it in a basket. At checkout I want to
+pick a delivery slot. I can pay by card online or cash when the order arrives.
+
+PM: Customers must see the order status: accepted, packed, out for delivery and delivered.
+
+Security lead: Payment data must not be stored on our servers, and only the manager can
+change products or see the daily numbers.
+
+Decision: the first release is single city and single store; multi-branch comes later.

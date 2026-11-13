@@ -77,6 +77,15 @@ OCR; meeting recording/transcription; automatic external messages; one independe
 
 ### ADR-009: Evals
 - `evals/metrics.py` is deterministic (quote matching, no LLM judge). DeepEval GEval is added per agent; judge model is `MODEL_JUDGE_EVAL`. `make eval` runs DeepEval and costs money.
+- Agent 2 adds `evals/planning_metrics.py` (coverage/linkage/cycle/estimate checks, no LLM judge) plus Golden Project B in `evals/golden/` and a DeepEval "Story Quality" check.
+
+### ADR-010: Agent 2 output is draft-only; review_status is separate from execution status
+- **Status:** Approved
+- Agent 2 receives only APPROVED requirements and returns local refs (`S1`/`T1`); ids are assigned by `save_draft_plan` and the agent never writes the DB directly.
+- `user_stories.review_status` / `tasks.review_status` (`draft|approved|rejected`) are independent of `tasks.status` (`todo|in_progress|blocked|done`): a PM can approve a story while its task is still `todo`.
+- Re-running Agent 2 keeps PM-decided rows (a story and its tasks) and matches the surviving tasks positionally per story, so a PM-edited title never creates duplicates.
+- `PlanningOutput` (Pydantic) rejects duplicate refs, unknown story/dependency refs, self-dependencies and cycles before persistence.
+- `GET /projects/{id}/planning/coverage` is the machine-readable coverage report; it is `clean` only when every approved requirement has an approved story and there are no cycles.
 
 ## Decision Log
 
@@ -85,3 +94,4 @@ OCR; meeting recording/transcription; automatic external messages; one independe
 | 2026-10-29 | Remove duplicate initial migration | Two root heads |
 | 2026-10-30 | LLM provider = Groq | Team choice; isolated behind factory |
 | 2026-10-30 | Graph decider taken from JWT | Prevent PM impersonation |
+| 2026-11-13 | Agent 2 draft-only, separate review_status (ADR-010) | Keep PM decisions independent of task execution |

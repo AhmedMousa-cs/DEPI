@@ -28,6 +28,8 @@ from app.db.base import Base
 #   sources.kind:      file | note | transcript | brief
 #   sources.phase:     initial | execution
 #   jobs.status:       queued | running | waiting_for_pm | done | failed | cancelled
+#   user_stories.review_status / tasks.review_status: draft | approved | rejected
+#   tasks.status:      todo | in_progress | blocked | done
 
 
 class User(Base):
@@ -301,6 +303,81 @@ class Requirement(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class UserStory(Base):
+    """Agent 2 draft. review_status is separate from execution: M5 only reviews the plan."""
+
+    __tablename__ = "user_stories"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    requirement_id: Mapped[int] = mapped_column(
+        ForeignKey("requirements.id", ondelete="CASCADE"), index=True
+    )
+    text: Mapped[str] = mapped_column(Text)
+    acceptance_criteria: Mapped[list[str]] = mapped_column(JSON, default=list)
+    confidence: Mapped[float] = mapped_column(Float, default=0)
+    review_status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
+    locked_by_pm: Mapped[bool] = mapped_column(Boolean, default=False)
+    pm_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    created_by_agent: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class Task(Base):
+    __tablename__ = "tasks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    story_id: Mapped[int] = mapped_column(
+        ForeignKey("user_stories.id", ondelete="CASCADE"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(200))
+    estimate_hours: Mapped[float] = mapped_column(Float)
+    assignee_member_id: Mapped[int | None] = mapped_column(
+        ForeignKey("team_members.id", ondelete="SET NULL"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(20), default="todo", index=True)
+    progress_pct: Mapped[int] = mapped_column(Integer, default=0)
+    start: Mapped[date | None] = mapped_column(Date, nullable=True)
+    end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    is_critical: Mapped[bool] = mapped_column(Boolean, default=False)
+    confidence: Mapped[float] = mapped_column(Float, default=0)
+    review_status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
+    locked_by_pm: Mapped[bool] = mapped_column(Boolean, default=False)
+    pm_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    created_by_agent: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class TaskDependency(Base):
+    __tablename__ = "task_dependencies"
+
+    task_id: Mapped[int] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
+    )
+    depends_on_task_id: Mapped[int] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
     )
 
 

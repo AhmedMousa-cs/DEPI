@@ -17,3 +17,6 @@ anthropic
 langgraph
 langgraph-checkpoint-postgres
 langfuse>=3,<4
+langchain
+langchain-openai
+langchain-anthropic

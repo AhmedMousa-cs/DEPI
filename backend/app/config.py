@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     llm_pricing_json: str = "{}"  # {"model": {"input_per_1m": x, "output_per_1m": y}}
     llm_require_pricing: bool = False
 
+    # Agent 4 (plan review) - the agent loop's guard rails
+    agent4_summary_trigger_tokens: int = 3500  # SummarizationMiddleware kicks in above this
+    agent4_summary_keep_messages: int = 6
+    agent4_max_model_calls: int = 12
+    agent4_max_tool_calls: int = 20
+
     # Langfuse
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None

@@ -31,3 +31,19 @@ def make_structured_llm(model: ChatModel, *, max_attempts: int = 3):
         ).value
 
     return call
+
+
+def make_runner_llm(*, project_id: int, job_id: int | None):
+    """Agent 3's StructuredLLM through llm/runner.run_structured: budget, agent_runs, Langfuse trace, audit."""
+    from app.agents.agent3_schedule import PROMPT_VERSION
+    from app.llm.runner import run_structured
+
+    def call(*, system_prompt: str, payload: dict[str, Any], schema: Type[T]) -> T:
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False, default=str)},
+        ]
+        return run_structured(project_id=project_id, job_id=job_id, agent="agent3_schedule",
+                              prompt_version=PROMPT_VERSION, messages=messages, schema=schema).parsed
+
+    return call

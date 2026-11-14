@@ -19,3 +19,5 @@ def demo_echo(ctx: JobContext, params: dict) -> str:
 
 import app.services.agent1_job  # noqa: E402,F401  (registers agent1.extract)
 import app.services.agent2_job  # noqa: E402,F401  (registers agent2.plan)
+import app.services.agent3_job  # noqa: E402,F401  (registers agent3.schedule)
+import app.services.agent4_job  # noqa: E402,F401  (registers agent4.review)

@@ -87,6 +87,18 @@ OCR; meeting recording/transcription; automatic external messages; one independe
 - `PlanningOutput` (Pydantic) rejects duplicate refs, unknown story/dependency refs, self-dependencies and cycles before persistence.
 - `GET /projects/{id}/planning/coverage` is the machine-readable coverage report; it is `clean` only when every approved requirement has an approved story and there are no cycles.
 
+### ADR-011: Agent 2 professional edition (prompt v2, self-correction, context, richer fields)
+- **Status:** Approved
+- **Context:** M5 shipped a single-pass Agent 2. The PM asked for a more professional agent ("أكثر احترافية") across four directions: a smarter prompt, self-correction, more input context and richer output — while agents stay draft-only and PM-only for ids/statuses/approval (ADR-010 still holds).
+- **Decision:**
+  - Prompt `agent2_plan_v2.md` (v1 kept): INVEST stories ("so that" benefit), **priority-first ordering** (every high-priority requirement before medium/low), critical-path cap (typically 2–4 tasks, never more than one third, never "first task of every story"), and a concrete rationale per task.
+  - Self-correction loop: `app/agents/plan_checks.py` runs deterministic checks on the agent's own output. **HARD** issues (requirement without story, story without task, duplicates, estimate out of range, >8 tasks/story, dependency cycles) that survive → `PlanQualityError` fails the job, nothing reaches the DB or the PM. **SOFT** polish issues (identical estimates, missing order, dependency-order violation, priority-first violation, critical-path problems, missing rationale) are fed back to the model for up to 3 passes × 2 attempts; survivors are recorded in the audit as `plan_soft_issues` and never block the plan.
+  - Context input: project brief, meeting transcript and the PM's scope-review comments (`requirements.pm_comment`) reach the agent as size-capped, wrapped untrusted blocks (`source_id=0`), scanned by the injection guard like any other input.
+  - Richer fields: `user_stories.plan_order`, `tasks.plan_order` + `tasks.rationale` persisted (migration `9d5c1e8a2b74`); `tasks.is_critical` now comes from the agent; schema enforces order uniqueness (globally for stories, per story for tasks) and rationale length 5..300. Audit snapshots include the new fields; the frontend shows order chips, a "Critical path" badge and the "Why:" rationale.
+  - Budget: `LLM_MAX_TOKENS_PER_JOB` 12000 → 80000 (worst case is 6 model calls, reserved pessimistically at 2 chars/token — 12000 rejected every real planning job).
+  - Golden Project B bumped to version 2 with four new thresholds (`ordering`, `priority_first`, `critical_path`, `rationale`, all must be true); live Groq run passes 14/14 (`evals/results/agent2-project-b-20261114T200438Z-6afd6007.json`, total_hours_ratio 0.03).
+- **Consequence:** a planning job may take up to ~3× longer (correction passes), but a plan that cannot be executed never reaches review, and plans now carry an explicit schedule, backbone and rationale the PM can judge.
+
 ## Decision Log
 
 | Date | Decision | Reason |
@@ -95,3 +107,4 @@ OCR; meeting recording/transcription; automatic external messages; one independe
 | 2026-10-30 | LLM provider = Groq | Team choice; isolated behind factory |
 | 2026-10-30 | Graph decider taken from JWT | Prevent PM impersonation |
 | 2026-11-13 | Agent 2 draft-only, separate review_status (ADR-010) | Keep PM decisions independent of task execution |
+| 2026-11-14 | Agent 2 professional edition: prompt v2, self-correction, context, richer fields (ADR-011) | PM requested "أكثر احترافية"; live Groq eval passes 14/14 thresholds |

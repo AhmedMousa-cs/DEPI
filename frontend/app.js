@@ -438,7 +438,9 @@ function planTaskRow(t) {
   const actions = t.review_status === "draft"
     ? `<div class="item-actions" style="margin:0"><button class="btn btn-primary btn-small" data-action="task-approve" data-id="${t.id}">Approve</button><button class="btn btn-secondary btn-small" data-action="task-edit" data-id="${t.id}">Edit</button><button class="btn btn-danger btn-small" data-action="task-reject" data-id="${t.id}">Reject</button></div>`
     : "";
-  return `<div class="project-row" style="align-items:flex-start"><div style="flex:1;min-width:0"><div class="project-title">${esc(t.title)} ${planBadge(t.review_status)}</div><div class="row-meta"><span class="badge">${esc(t.estimate_hours)} h</span><span class="badge">${esc(t.status)}</span><span class="subtle">Confidence ${Math.round((Number(t.confidence) || 0) * 100)}%</span>${deps ? `<span class="subtle">Depends on:</span> ${deps}` : ""}</div>${t.pm_comment ? `<div class="subtle">PM: ${esc(t.pm_comment)}</div>` : ""}</div>${actions}</div>`;
+  const order = t.plan_order ? `<span class="badge">Step ${esc(t.plan_order)}</span>` : "";
+  const critical = t.is_critical ? '<span class="badge" style="background:#fff4e5;color:#9a5b00">Critical path</span>' : "";
+  return `<div class="project-row" style="align-items:flex-start"><div style="flex:1;min-width:0"><div class="project-title">${esc(t.title)} ${planBadge(t.review_status)}${critical}</div><div class="row-meta">${order}<span class="badge">${esc(t.estimate_hours)} h</span><span class="badge">${esc(t.status)}</span><span class="subtle">Confidence ${Math.round((Number(t.confidence) || 0) * 100)}%</span>${deps ? `<span class="subtle">Depends on:</span> ${deps}` : ""}</div>${t.rationale ? `<div class="subtle">Why: ${esc(t.rationale)}</div>` : ""}${t.pm_comment ? `<div class="subtle">PM: ${esc(t.pm_comment)}</div>` : ""}</div>${actions}</div>`;
 }
 
 function planStoryCard(s) {
@@ -447,8 +449,9 @@ function planStoryCard(s) {
   const actions = s.review_status === "draft"
     ? `<div class="item-actions" style="margin:8px 0 0"><button class="btn btn-primary btn-small" data-action="story-approve" data-id="${s.id}">Approve</button><button class="btn btn-secondary btn-small" data-action="story-edit" data-id="${s.id}">Edit</button><button class="btn btn-danger btn-small" data-action="story-reject" data-id="${s.id}">Reject</button></div>`
     : "";
+  const order = s.plan_order ? `<span class="badge">Order ${esc(s.plan_order)}</span>` : "";
   const taskBlock = tasks.length ? `<div class="project-list" style="margin-top:10px">${tasks.map(planTaskRow).join("")}</div>` : '<p class="subtle" style="margin:10px 0 0">No tasks under this story (or hidden by the filter).</p>';
-  return `<div class="project-row" style="display:block;align-items:stretch"><div class="project-title">${esc(s.text)} ${planBadge(s.review_status)}</div><div class="row-meta"><span class="badge">Requirement #${s.requirement_id}</span><span class="subtle">Confidence ${Math.round((Number(s.confidence) || 0) * 100)}%</span></div><div class="subtle">${esc(reqLabel(s.requirement_id))}</div>${criteria ? `<ul style="margin:8px 0 0 18px;font-size:13px">${criteria}</ul>` : ""}${actions}${taskBlock}</div>`;
+  return `<div class="project-row" style="display:block;align-items:stretch"><div class="project-title">${esc(s.text)} ${planBadge(s.review_status)}</div><div class="row-meta">${order}<span class="badge">Requirement #${s.requirement_id}</span><span class="subtle">Confidence ${Math.round((Number(s.confidence) || 0) * 100)}%</span></div><div class="subtle">${esc(reqLabel(s.requirement_id))}</div>${criteria ? `<ul style="margin:8px 0 0 18px;font-size:13px">${criteria}</ul>` : ""}${actions}${taskBlock}</div>`;
 }
 
 function coverageSection(c) {

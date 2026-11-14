@@ -41,8 +41,11 @@ class Settings(BaseSettings):
     daily_budget_usd: float = Field(
         default=5.0, validation_alias=AliasChoices("LLM_DAILY_BUDGET_USD", "DAILY_BUDGET_USD")
     )
+    # Worst-case token reserve for ONE agent job. Agent 2's self-correction loop can make up to
+    # MAX_PASSES * ATTEMPTS_PER_PASS calls, and the reserve is computed pessimistically
+    # (2 chars/token), so this needs real headroom or planning jobs get rejected.
     max_tokens_per_job: int = Field(
-        default=12000, validation_alias=AliasChoices("LLM_MAX_TOKENS_PER_JOB", "MAX_TOKENS_PER_JOB")
+        default=80000, validation_alias=AliasChoices("LLM_MAX_TOKENS_PER_JOB", "MAX_TOKENS_PER_JOB")
     )
     llm_pricing_json: str = "{}"  # {"model": {"input_per_1m": x, "output_per_1m": y}}
     llm_require_pricing: bool = False

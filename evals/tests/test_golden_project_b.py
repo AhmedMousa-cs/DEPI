@@ -83,6 +83,7 @@ def test_duplicate_story_for_a_requirement_is_flagged(expected):
     plan = oracle_plan(expected)
     first = copy.deepcopy(plan["stories"][0])
     first["ref"] = "S9"
+    first.pop("order", None)  # duplicate the requirement/text only; a copied order would fail the schema first
     plan["stories"].append(first)
     r = run(expected, plan)
     assert r["link_integrity"] is False
@@ -178,3 +179,66 @@ def test_empty_plan_is_safe(expected):
     r = run(expected, {})
     assert r["schema_valid"] is False and r["story_coverage"] == 0.0
     assert r["link_integrity"] is False and r["cycle_free"] is False
+
+
+# ---- professional quality (v2): ordering, critical path, rationale ---------------------------------
+
+
+def test_missing_order_lowers_ordering(expected):
+    plan = oracle_plan(expected)
+    for t in plan["tasks"]:
+        t["order"] = None
+    r = run(expected, plan)
+    assert r["ordering"] is False and r["passed"]["ordering"] is False
+
+
+def test_task_ordered_before_its_dependency_lowers_ordering(expected):
+    plan = oracle_plan(expected)
+    task(plan, "T1")["order"], task(plan, "T2")["order"] = 2, 1
+    r = run(expected, plan)
+    assert r["ordering"] is False and r["passed"]["ordering"] is False
+
+
+def test_medium_priority_story_planned_before_high_lowers_priority_first(expected):
+    plan = oracle_plan(expected)
+    story(plan, "S6")["order"], story(plan, "S5")["order"] = 7, 5
+    r = run(expected, plan)
+    assert r["priority_first"] is False and r["passed"]["priority_first"] is False
+
+
+def test_duplicate_story_order_is_rejected(expected):
+    plan = oracle_plan(expected)
+    story(plan, "S2")["order"] = story(plan, "S1")["order"]
+    r = run(expected, plan)
+    assert r["schema_valid"] is False
+    assert "order values must be unique" in " ".join(r["errors"])
+
+
+def test_plan_without_critical_tasks_lowers_critical_path(expected):
+    plan = oracle_plan(expected)
+    for t in plan["tasks"]:
+        t["is_critical"] = False
+    r = run(expected, plan)
+    assert r["critical_path"] is False and r["passed"]["critical_path"] is False
+
+
+def test_every_task_marked_critical_lowers_critical_path(expected):
+    plan = oracle_plan(expected)
+    for t in plan["tasks"]:
+        t["is_critical"] = True
+    r = run(expected, plan)
+    assert r["critical_path"] is False and r["passed"]["critical_path"] is False
+
+
+def test_missing_rationale_lowers_rationale(expected):
+    plan = oracle_plan(expected)
+    plan["tasks"][0]["rationale"] = None
+    r = run(expected, plan)
+    assert r["rationale"] is False and r["passed"]["rationale"] is False
+
+
+def test_too_short_rationale_is_rejected(expected):
+    plan = oracle_plan(expected)
+    plan["tasks"][0]["rationale"] = "fix"
+    r = run(expected, plan)
+    assert r["schema_valid"] is False and r["passed"]["schema_valid"] is False

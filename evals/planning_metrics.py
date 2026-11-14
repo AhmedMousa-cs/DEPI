@@ -27,6 +27,7 @@ def oracle_plan(expected: dict) -> dict:
                 "text": s["text"],
                 "acceptance_criteria": list(s["acceptance_criteria"]),
                 "confidence": 0.9,
+                "order": s.get("order"),
             }
             for s in expected["stories"]
         ],
@@ -38,10 +39,17 @@ def oracle_plan(expected: dict) -> dict:
                 "estimate_hours": t["estimate_hours"],
                 "depends_on": list(t.get("depends_on", [])),
                 "confidence": 0.85,
+                "order": t.get("order"),
+                "is_critical": bool(t.get("is_critical")),
+                "rationale": t.get("rationale"),
             }
             for t in expected["tasks"]
         ],
     }
+
+
+def _priority(expected: dict, requirement_id: int) -> str | None:
+    return next((r.get("priority") for r in expected["requirements"] if r["requirement_id"] == requirement_id), None)
 
 
 def evaluate_plan(expected: dict, raw_output: dict) -> dict:
@@ -59,21 +67,19 @@ def evaluate_plan(expected: dict, raw_output: dict) -> dict:
     requirement_ids = {r["requirement_id"] for r in expected["requirements"]}
 
     if output is None:
+        failed = {k: False for k in ("link_integrity", "cycle_free", "estimate_sanity", "acceptance_criteria",
+                                     "task_granularity", "ordering", "priority_first", "critical_path", "rationale")}
         return {
             "schema_valid": False,
             "story_coverage": 0.0,
             "story_recall": 0.0,
             "task_recall": 0.0,
-            "link_integrity": False,
-            "cycle_free": False,
-            "estimate_sanity": False,
-            "acceptance_criteria": False,
-            "task_granularity": False,
+            **failed,
             "total_hours": 0.0,
             "total_hours_ratio": 0.0,
             "details": {"errors": errors},
             "errors": errors,
-            "passed": {"schema_valid": False},
+            "passed": {"schema_valid": False, **failed},
         }
 
     stories = output.stories
@@ -149,6 +155,30 @@ def evaluate_plan(expected: dict, raw_output: dict) -> dict:
     expected_hours = sum(float(t["estimate_hours"]) for t in expected_tasks)
     total_hours_ratio = round(abs(total_hours - expected_hours) / expected_hours, 4) if expected_hours else 1.0
 
+    # professional ordering: every story and task carries an order, unique in its scope, and a
+    # dependency is always earlier in the implied execution sequence than the task that needs it
+    story_order = {s.ref: s.order for s in stories}
+    order_by_ref = {t.ref: (story_order.get(t.story_ref), t.order) for t in tasks}
+    ordering = (
+        all(s.order is not None for s in stories)
+        and all(t.order is not None for t in tasks)
+        and len({s.order for s in stories}) == len(stories)
+        and all(len({t.order for t in tasks_by_story.get(ref, [])}) == len(tasks_by_story.get(ref, [])) for ref in story_ids)
+        and all(order_by_ref[t.ref] > order_by_ref[dep] for t in tasks for dep in t.depends_on)
+    )
+
+    # value first: high-priority requirements are planned before the rest
+    high = [s.order for s in stories if s.order is not None and _priority(expected, s.requirement_id) == "high"]
+    others = [s.order for s in stories if s.order is not None and _priority(expected, s.requirement_id) != "high"]
+    priority_first = not others or (bool(high) and max(high) < min(others))
+
+    # critical path: marked, but only on the backbone
+    critical = [t for t in tasks if t.is_critical]
+    critical_path = bool(tasks) and 1 <= len(critical) <= max(1, len(tasks) // 3)
+
+    # every task explains why it exists
+    rationale = bool(tasks) and all(t.rationale and 5 <= len(t.rationale.strip()) <= 200 for t in tasks)
+
     result = {
         "schema_valid": schema_valid,
         "story_coverage": story_coverage,
@@ -159,12 +189,17 @@ def evaluate_plan(expected: dict, raw_output: dict) -> dict:
         "estimate_sanity": estimate_sanity,
         "acceptance_criteria": acceptance_criteria,
         "task_granularity": task_granularity,
+        "ordering": ordering,
+        "priority_first": priority_first,
+        "critical_path": critical_path,
+        "rationale": rationale,
         "total_hours": total_hours,
         "total_hours_ratio": total_hours_ratio,
         "details": {
             "requirements_without_story": sorted(requirement_ids - covered),
             "stories": len(stories),
             "tasks": len(tasks),
+            "critical_tasks": len(critical),
             "unmatched_stories": [s["ref"] for s in expected_stories if not any(
                 a.requirement_id == s["requirement_id"] and _terms_hit(a.text, s.get("match_terms", [])) for a in stories
             )],
@@ -185,6 +220,10 @@ def evaluate_plan(expected: dict, raw_output: dict) -> dict:
         "cycle_free": result["cycle_free"],
         "estimate_sanity": result["estimate_sanity"],
         "task_granularity": result["task_granularity"],
+        "ordering": result["ordering"] == th.get("ordering", True),
+        "priority_first": result["priority_first"] == th.get("priority_first", True),
+        "critical_path": result["critical_path"] == th.get("critical_path", True),
+        "rationale": result["rationale"] == th.get("rationale", True),
         "schema_valid": result["schema_valid"],
     }
     return result

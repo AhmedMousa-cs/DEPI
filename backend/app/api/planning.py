@@ -34,6 +34,7 @@ def _story_snapshot(story: UserStory) -> dict:
         "acceptance_criteria": list(story.acceptance_criteria or []),
         "review_status": story.review_status,
         "requirement_id": story.requirement_id,
+        "plan_order": story.plan_order,
     }
 
 
@@ -44,6 +45,9 @@ def _task_snapshot(task: Task) -> dict:
         "review_status": task.review_status,
         "status": task.status,
         "story_id": task.story_id,
+        "plan_order": task.plan_order,
+        "is_critical": task.is_critical,
+        "rationale": task.rationale,
     }
 
 

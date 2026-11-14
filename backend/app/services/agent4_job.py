@@ -48,4 +48,12 @@ def run_agent4_review(ctx: JobContext, params: dict) -> str:
 
 
 def after_review(project_id: int, version: int) -> None:
-    """Hook: the approval gate is opened here (added with the gate)."""
+    """Open the PM approval gate for the reviewed draft. A failure here must not fail the review."""
+    try:
+        from app.orchestrator.checkpoints import postgres_checkpointer
+        from app.orchestrator.plan_gate import PlanGate
+
+        with postgres_checkpointer() as saver:
+            PlanGate(saver).open(project_id, version)
+    except Exception:  # noqa: BLE001
+        log.exception("could not open the plan gate for project %s v%s", project_id, version)

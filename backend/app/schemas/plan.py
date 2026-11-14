@@ -89,6 +89,8 @@ class PlanVersionDetail(PlanVersionSummary):
     snapshot: dict
     diff_from_prev: dict | None
     risks: list[RiskOut] = []
+    warnings: list[str] = []
+    diff_vs_approved: dict | None = None
 
 
 class ApproveBody(BaseModel):
@@ -114,6 +116,12 @@ class TaskOverride(BaseModel):
     task_id: int = Field(gt=0)
     duration_days: int | None = Field(default=None, ge=1, le=365)
     assignee_member_id: int | None = Field(default=None, gt=0)
+
+
+class ReviewBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rules_only: bool = False
 
 
 class GenerateBody(BaseModel):

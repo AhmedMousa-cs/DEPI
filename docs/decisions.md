@@ -95,3 +95,4 @@ OCR; meeting recording/transcription; automatic external messages; one independe
 | 2026-10-30 | LLM provider = Groq | Team choice; isolated behind factory |
 | 2026-10-30 | Graph decider taken from JWT | Prevent PM impersonation |
 | 2026-11-13 | Agent 2 draft-only, separate review_status (ADR-010) | Keep PM decisions independent of task execution |
+| 2026-11-14 | Plan approval gate + Agent 4 (ADR-011, see docs/plan-approval.md) | Agents draft, only the PM-gated writer approves; rules can raise but never lower the agent's verdict |

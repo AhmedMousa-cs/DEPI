@@ -14,9 +14,9 @@ class FakeModel:
 
     def invoke(self, *, messages, response_schema=None, max_tokens=2000):
         self.seen.append(messages)
-        props = (response_schema or {}).get("properties", {})
-        if "estimates" in props:
-            ids = [t["task_id"] for t in json.loads(messages[1]["content"])["tasks"]]
+        payload = json.loads(messages[1]["content"])
+        if "tasks" in payload:  # estimation call (explanation payload has no "tasks")
+            ids = [t["task_id"] for t in payload["tasks"]]
             body = {"estimates": [{"task_id": i, "duration_days": 2, "rationale": "x"} for i in ids]}
         else:
             body = {"summary": "s", "critical_path": "c"}

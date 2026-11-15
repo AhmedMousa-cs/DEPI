@@ -5,6 +5,7 @@ M0-M3 code is on branch fix/m0-m3-closure. A milestone is DONE only with evidenc
 M4 (Agent 1) and M5 (Agent 2: stories & tasks) are on branch feature/m5-agent2-stories-tasks.
 M5.1 (Agent 2 professional edition) is on branch feature/agent2-v2-professional (stacked on M5).
 M6.1 (Agent 3 platform integration) is on branch feature/m6-agent3-integration (stacked on M5.1).
+M4.1 (Agent 1 smart review: modules/priorities/questions/bulk/gaps) is on branch feature/agent1-smart-review (stacked on M6.1).
 
 ## M5 evidence (Agent 2 - stories & tasks)
 - [x] full backend suite in the container (Python 3.11): 284 passed
@@ -38,6 +39,16 @@ M6.1 (Agent 3 platform integration) is on branch feature/m6-agent3-integration (
 - [x] PM-only API: `GET /projects/{id}/scheduling` + `POST .../scheduling/{draft_id}/decision` (comment required on reject, 409 on re-decide/older draft); frontend "Schedule" tab
 - [x] fixed cross-project dependency leak in `_task_inputs` (dependencies filtered to this project's task ids)
 - [x] live e2e on the dev stack: agent3 job done (explanation source = llm, run_ids recorded), draft #2 created (16 tasks, critical path 1→2→5→7→16, end 2026-11-24), 0 dates before approval, 16/16 dated after, re-decide 409, leader 403
+
+## M4.1 evidence (Agent 1 smart review)
+- [x] full backend suite in the container: 433 passed (10 new: v3 schema fields, persistence, bulk decision, gaps, audit snapshots)
+- [x] migration `d4b7e2c95a61` applied (`alembic current` = d4b7e2c95a61, head); chained on `c2a9e1f47b35` (single head preserved)
+- [x] prompt v3 (`agent1_extract_v3.md`, v2 kept): module + priority suggestion + clarify question for implied/vague items; decision items never carry a priority
+- [x] quote verification and injection guards untouched — anti-hallucination guarantees identical to M4
+- [x] bulk PM decision `POST /projects/{id}/requirements/decision`: one transaction, per-requirement audit rows with `bulk: true`, all-or-nothing 404 on unknown/foreign ids, comment required on reject
+- [x] coverage gaps `GET /projects/{id}/requirements/gaps`: 11 standard areas, EN+AR keywords, rejected requirements excluded
+- [x] frontend: requirements grouped by module with per-module Approve/Reject all, ❓ clarify questions shown with an answer hint, coverage-gap chips in the Scope tab
+- [x] live e2e on the dev stack: agent1 v3 job done → 5/5 requirements with modules (Authentication | Bookings | Payments | Records | Scheduling) + priorities; gaps flagged 8 genuinely unmentioned areas; bulk approved a module; bulk reject without comment refused
 
 ## Evidence log (fill in with real output)
 - [ ] clean clone -> make up -> /health ok -> alembic current = 5b7e1c9a2d84 (head)

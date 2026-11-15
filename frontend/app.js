@@ -6,7 +6,7 @@ const MAX_UPLOAD = 5 * 1024 * 1024;
 const STATUS = { setup: "Setup", planning: "Planning", scope_review: "Scope review", plan_review: "Plan review", active: "Active", closed: "Closed" };
 const KIND = { brief: "Brief", transcript: "Transcript", note: "Note", file: "File" };
 
-const state = { me: null, projects: [], project: null, team: [], leaders: [], page: "portfolio", tab: "overview", modal: null, notice: null, navOpen: false, reqs: [], scope: null, reqFilter: "all", job: null, stories: [], tasks: [], coverage: null, planFilter: "all", planJob: null, schedule: null, scheduleJob: null };
+const state = { me: null, projects: [], project: null, team: [], leaders: [], page: "portfolio", tab: "overview", modal: null, notice: null, navOpen: false, reqs: [], scope: null, gaps: null, reqFilter: "all", job: null, stories: [], tasks: [], coverage: null, planFilter: "all", planJob: null, schedule: null, scheduleJob: null };
 const app = document.getElementById("app");
 const isPM = () => state.me && state.me.role === "PM";
 
@@ -142,7 +142,7 @@ function modalView() {
 function render() {
   const notice = state.notice; state.notice = null;
   const body = state.page === "project" && state.project ? projectView() : portfolioView();
-  app.innerHTML = `<div class="app-shell">${sidebar()}<div class="main-area">${topbar()}<main class="content">${notice ? noticeHtml(notice) : ""}${body}</main></div></div>${state.modal ? (state.modal.type === "decide-req" ? scopeModal() : state.modal.type === "decide-story" || state.modal.type === "decide-task" ? planModal() : state.modal.type === "decide-schedule" ? scheduleModal() : modalView()) : ""}`;
+  app.innerHTML = `<div class="app-shell">${sidebar()}<div class="main-area">${topbar()}<main class="content">${notice ? noticeHtml(notice) : ""}${body}</main></div></div>${state.modal ? (state.modal.type === "decide-req" || state.modal.type === "decide-req-bulk" ? scopeModal() : state.modal.type === "decide-story" || state.modal.type === "decide-task" ? planModal() : state.modal.type === "decide-schedule" ? scheduleModal() : modalView()) : ""}`;
 }
 
 function showModalError(msg) {
@@ -271,6 +271,7 @@ async function reloadScope() {
     api(`/projects/${id}/scope/status`).catch(e => { if (e.message === "unauthorized") throw e; return null; }),
   ]);
   state.reqs = reqs; state.scope = scope;
+  state.gaps = await api(`/projects/${id}/requirements/gaps`).catch(e => { if (e.message === "unauthorized") throw e; return null; });
 }
 
 function pollJob(id) {
@@ -309,7 +310,29 @@ function reqCard(r) {
   const status = r.status === "approved" ? '<span class="badge green">Approved</span>' : r.status === "rejected" ? b("Rejected", "#fde8e8", "#b00020") : '<span class="badge blue">Draft</span>';
   const src = r.source_id ? `<button class="btn btn-quiet btn-small" data-action="view-source" data-id="${r.source_id}">View source</button>` : '<span class="subtle">No source linked</span>';
   const act = r.status === "draft" ? `<div class="item-actions" style="margin:0"><button class="btn btn-primary btn-small" data-action="req-approve" data-id="${r.id}">Approve</button><button class="btn btn-secondary btn-small" data-action="req-edit" data-id="${r.id}">Edit</button><button class="btn btn-danger btn-small" data-action="req-reject" data-id="${r.id}">Reject</button></div>` : "";
-  return `<div class="project-row" style="align-items:flex-start"><div style="flex:1;min-width:0"><div class="project-title">${esc(r.text)}</div><blockquote style="margin:8px 0;padding:6px 10px;border-left:3px solid #dde5ef;font-size:13px;white-space:pre-wrap">${esc(r.quote || "No quote")}</blockquote><div class="row-meta">${status}<span class="badge">${esc(r.type)}</span>${r.priority ? `<span class="badge">${esc(r.priority)}</span>` : ""}${verified}<span class="subtle">Confidence ${pct}%</span>${warn}${src}</div>${r.pm_comment ? `<div class="subtle">PM: ${esc(r.pm_comment)}</div>` : ""}</div>${act}</div>`;
+  const question = r.clarify_question ? `<div class="row-meta" style="margin-top:6px">${b("❓ " + r.clarify_question, "#fff4e5", "#9a5b00")}</div><div class="subtle">Answer it with Edit or a decision comment — your answer reaches Agent 2.</div>` : "";
+  return `<div class="project-row" style="align-items:flex-start"><div style="flex:1;min-width:0"><div class="project-title">${esc(r.text)}</div><blockquote style="margin:8px 0;padding:6px 10px;border-left:3px solid #dde5ef;font-size:13px;white-space:pre-wrap">${esc(r.quote || "No quote")}</blockquote><div class="row-meta">${status}<span class="badge">${esc(r.type)}</span>${r.priority ? `<span class="badge">${esc(r.priority)}</span>` : ""}${verified}<span class="subtle">Confidence ${pct}%</span>${warn}${src}</div>${question}${r.pm_comment ? `<div class="subtle">PM: ${esc(r.pm_comment)}</div>` : ""}</div>${act}</div>`;
+}
+
+function reqGroupHtml(mod, items) {
+  const drafts = items.filter(r => r.status === "draft");
+  const ids = JSON.stringify(drafts.map(r => r.id));
+  const bulk = drafts.length
+    ? `<div class="item-actions" style="margin:10px 0 0"><button class="btn btn-primary btn-small" data-action="req-approve-group" data-ids='${esc(ids)}'>Approve all (${drafts.length})</button><button class="btn btn-danger btn-small" data-action="req-reject-group" data-ids='${esc(ids)}'>Reject all (needs a reason)</button></div>`
+    : "";
+  return `<section class="card section-card" style="margin-bottom:14px"><h2 style="display:flex;align-items:center;gap:8px">${esc(mod)} <span class="badge blue">${items.length}</span></h2>${bulk}<div class="card-body" style="margin-top:${bulk ? "10" : "0"}px"><div class="project-list">${items.map(reqCard).join("")}</div></div></section>`;
+}
+
+function gapsSection() {
+  const g = state.gaps;
+  if (!g || g.empty) return "";
+  const chip = a => a.covered
+    ? `<span class="badge green">✓ ${esc(a.area)}</span>`
+    : `<span class="badge" style="background:#fde8e8;color:#b00020">✗ ${esc(a.area)}</span>`;
+  const verdict = g.missing_count
+    ? `${g.missing_count} area(s) nobody mentioned — good questions for the next client meeting.`
+    : "Every standard area was mentioned in the sources.";
+  return `<section class="card section-card" style="margin-top:16px"><h2>Coverage gaps <span class="badge ${g.missing_count ? "" : "green"}">${g.covered_count}/${g.areas.length} covered</span></h2><p class="section-intro">Deterministic check (no LLM): standard product areas matched against the requirement texts. A missing area is a question for the review meeting, not a fact.</p><div style="display:flex;gap:6px;flex-wrap:wrap">${g.areas.map(chip).join("")}</div><p class="subtle" style="margin-top:8px">${esc(verdict)}</p></section>`;
 }
 
 function scopeView() {
@@ -319,13 +342,23 @@ function scopeView() {
   const jobLine = job ? `<div class="callout${job.status === "failed" ? " warning" : ""}">Extraction job #${esc(job.id)}: <b>${esc(job.status)}</b> (${esc(job.progress)}%)${job.error ? "<br>" + esc(job.error) : ""}</div>` : "";
   const chips = [["all", "All", c.all], ["draft", "To review", c.draft], ["approved", "Approved", c.approved], ["rejected", "Rejected", c.rejected], ["unverified", "Unverified", c.unverified]]
     .map(f => `<button class="btn ${state.reqFilter === f[0] ? "btn-primary" : "btn-secondary"} btn-small" data-action="scope-filter" data-f="${f[0]}">${f[1]} (${f[2]})</button>`).join(" ");
-  const list = filteredReqs().map(reqCard).join("");
+  const groups = [...filteredReqs().reduce((m, r) => {
+    const mod = r.module || "General";
+    if (!m.has(mod)) m.set(mod, []);
+    m.get(mod).push(r);
+    return m;
+  }, new Map())]
+    .sort(([a], [b]) => (a === "General") - (b === "General") || a.localeCompare(b))
+    .map(([mod, items]) => reqGroupHtml(mod, items))
+    .join("");
   const canApprove = c.draft === 0 && c.all > 0;
-  return `<div class="page-head"><div><div class="eyebrow">US02</div><h1>Scope review</h1><p>Each requirement comes with the quote it was extracted from. Approve, edit or reject every draft, then approve the scope.</p></div><div><button class="btn btn-secondary" data-action="run-extract"${running ? " disabled" : ""}>${running ? "Extracting..." : "Run extraction"}</button></div></div>${jobLine}<div class="callout">Gate: <b>${esc(gate)}</b> · Project status: <b>${esc(sc ? sc.project_status : state.project.status)}</b></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin:12px 0">${chips}</div><section class="card"><div class="card-body">${list ? `<div class="project-list">${list}</div>` : '<div class="empty"><div class="empty-icon">◈</div><h3>No requirements here</h3><p>Run the extraction, or change the filter.</p></div>'}</div></section><section class="card section-card" style="margin-top:16px"><h2>Approve scope</h2><p class="section-intro">Every requirement must be decided first.</p><div class="form-grid">${field("Comment (optional)", '<input id="scope-comment" maxlength="2000">', true)}</div><div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-primary" data-action="approve-scope"${canApprove ? "" : " disabled"}>Approve scope</button><button class="btn btn-quiet" data-action="open-gate">Re-open gate</button></div>${canApprove ? "" : `<p class="subtle">${c.all === 0 ? "Run the extraction first." : c.draft + " draft(s) still need a decision."}</p>`}</section>`;
+  return `<div class="page-head"><div><div class="eyebrow">US02</div><h1>Scope review</h1><p>Requirements grouped by feature area. Approve a whole module in one click, or drill into any item.</p></div><div><button class="btn btn-secondary" data-action="run-extract"${running ? " disabled" : ""}>${running ? "Extracting..." : "Run extraction"}</button></div></div>${jobLine}<div class="callout">Gate: <b>${esc(gate)}</b> · Project status: <b>${esc(sc ? sc.project_status : state.project.status)}</b></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin:12px 0">${chips}</div>${groups ? groups : '<section class="card"><div class="card-body"><div class="empty"><div class="empty-icon">◈</div><h3>No requirements here</h3><p>Run the extraction, or change the filter.</p></div></div></section>'}${gapsSection()}<section class="card section-card" style="margin-top:16px"><h2>Approve scope</h2><p class="section-intro">Every requirement must be decided first.</p><div class="form-grid">${field("Comment (optional)", '<input id="scope-comment" maxlength="2000">', true)}</div><div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-primary" data-action="approve-scope"${canApprove ? "" : " disabled"}>Approve scope</button><button class="btn btn-quiet" data-action="open-gate">Re-open gate</button></div>${canApprove ? "" : `<p class="subtle">${c.all === 0 ? "Run the extraction first." : c.draft + " draft(s) still need a decision."}</p>`}</section>`;
 }
 
 function scopeModal() {
   const m = state.modal, r = m.req;
+  if (m.type === "decide-req-bulk")
+    return modalShell("Reject a whole module", `${m.ids.length} requirement(s) will be rejected. No dates, no stories — nothing is lost, you can re-run the extraction.`, "decide-req-bulk", field("Reason *", '<textarea name="comment" required></textarea>', true), "Reject all");
   if (m.mode === "rejected")
     return modalShell("Reject requirement", r.text, "decide-req", field("Reason *", '<textarea name="comment" required></textarea>', true), "Reject");
   const types = REQ_TYPES.includes(r.type) ? REQ_TYPES : REQ_TYPES.concat(r.type);
@@ -372,6 +405,13 @@ Object.assign(actions, {
   },
   "req-reject": t => { state.modal = { type: "decide-req", mode: "rejected", req: reqById(t.dataset.id) }; render(); },
   "req-edit": t => { state.modal = { type: "decide-req", mode: "modified", req: reqById(t.dataset.id) }; render(); },
+  "req-approve-group": async t => {
+    const ids = JSON.parse(t.dataset.ids);
+    if (!ids.length || !confirm(`Approve ${ids.length} requirement(s) in this module?`)) return;
+    await post(`/projects/${state.project.id}/requirements/decision`, { ids, decision: "approved" });
+    await reloadScope(); state.notice = { type: "ok", text: `${ids.length} requirement(s) approved.` }; render();
+  },
+  "req-reject-group": t => { state.modal = { type: "decide-req-bulk", ids: JSON.parse(t.dataset.ids) }; render(); },
   "run-extract": async () => {
     if (!confirm("Run extraction? New draft requirements will be added for review.")) return;
     const job = await post(`/projects/${state.project.id}/jobs`, { type: "agent1.extract" });
@@ -400,6 +440,12 @@ Object.assign(submitters, {
     await post(`/projects/${state.project.id}/requirements/${m.req.id}/decision`, body);
     state.modal = null; await reloadScope();
     state.notice = { type: "ok", text: m.mode === "rejected" ? "Requirement rejected." : "Requirement updated." }; render();
+  },
+  "decide-req-bulk": async form => {
+    const m = state.modal, d = new FormData(form);
+    await post(`/projects/${state.project.id}/requirements/decision`, { ids: m.ids, decision: "rejected", comment: String(d.get("comment") || "").trim() });
+    state.modal = null; await reloadScope();
+    state.notice = { type: "ok", text: `${m.ids.length} requirement(s) rejected.` }; render();
   },
 });
 

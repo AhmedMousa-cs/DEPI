@@ -10,7 +10,13 @@ from app.auth.dependencies import require_role
 from app.db.models import AgentRun, Decision, Requirement, User
 from app.db.session import get_db
 from app.observability.langfuse import send_pm_score
-from app.schemas.review import ReqStatus, RequirementDecision, RequirementOut
+from app.services.coverage_gaps import project_gaps
+from app.schemas.review import (
+    BulkRequirementDecision,
+    ReqStatus,
+    RequirementDecision,
+    RequirementOut,
+)
 
 # Reviewing agent output is PM-only (Blueprint section 3).
 router = APIRouter(prefix="/projects/{project_id}/requirements", tags=["requirements"])
@@ -22,8 +28,18 @@ def _snapshot(r: Requirement) -> dict:
         "type": r.type,
         "text": r.text,
         "priority": r.priority,
+        "module": r.module,
         "locked_by_pm": r.locked_by_pm,
     }
+
+
+def _apply_decision(req: Requirement, *, decision: str, comment: str | None, user: User) -> None:
+    """The shared PM-decision write (used by the single and bulk endpoints). Caller adds audit/Decision."""
+    req.status = "rejected" if decision == "rejected" else "approved"
+    req.locked_by_pm = True  # any PM decision protects the item from being overwritten by a re-run
+    req.pm_comment = comment or None
+    req.reviewed_by = user.id
+    req.reviewed_at = datetime.now(timezone.utc)
 
 
 def _load(db: Session, project_id: int, requirement_id: int, *, lock: bool = False) -> Requirement:
@@ -56,6 +72,17 @@ def list_requirements(
     return list(db.scalars(stmt.order_by(Requirement.id)))
 
 
+@router.get("/gaps", response_model=dict)
+def requirements_gaps(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("PM")),
+):
+    """Deterministic coverage check: which standard product areas nobody mentioned yet."""
+    get_project_or_404(db, project_id)
+    return project_gaps(db, project_id)
+
+
 @router.get("/{requirement_id}", response_model=RequirementOut)
 def get_requirement(
     project_id: int,
@@ -65,6 +92,60 @@ def get_requirement(
 ):
     get_project_or_404(db, project_id)
     return _load(db, project_id, requirement_id)
+
+
+@router.post("/decision", response_model=list[RequirementOut])
+def decide_requirements_bulk(
+    project_id: int,
+    body: BulkRequirementDecision,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("PM")),
+):
+    """One decision for many requirements (module-level review). One transaction for the whole batch."""
+    get_project_or_404(db, project_id)
+    wanted = list(dict.fromkeys(body.ids))
+    rows = {
+        r.id: r
+        for r in db.scalars(
+            select(Requirement)
+            .where(Requirement.project_id == project_id, Requirement.id.in_(wanted))
+            .with_for_update()
+        )
+    }
+    missing = [rid for rid in wanted if rid not in rows]
+    if missing:
+        raise HTTPException(404, f"Requirement(s) not found in this project: {missing}")
+
+    updated: list[Requirement] = []
+    for rid in wanted:
+        req = rows[rid]
+        before = _snapshot(req)
+        _apply_decision(req, decision=body.decision, comment=body.comment, user=user)
+        db.add(
+            Decision(
+                project_id=project_id,
+                subject_type="requirement",
+                subject_id=req.id,
+                decision=body.decision,
+                reason=body.comment or None,
+                decided_by=user.id,
+            )
+        )
+        write_audit(
+            db,
+            user_actor(user),
+            f"requirement.{body.decision}",
+            "requirement",
+            req.id,
+            before=before,
+            after={**_snapshot(req), "project_id": project_id, "bulk": True,
+                   "comment": body.comment or None},
+        )
+        updated.append(req)
+    db.commit()
+    for req in updated:
+        db.refresh(req)
+    return updated
 
 
 @router.post("/{requirement_id}/decision", response_model=RequirementOut)
@@ -87,11 +168,7 @@ def decide_requirement(
         if body.priority is not None:
             req.priority = body.priority
 
-    req.status = "rejected" if body.decision == "rejected" else "approved"
-    req.locked_by_pm = True  # any PM decision protects the item from being overwritten by a re-run
-    req.pm_comment = body.comment or None
-    req.reviewed_by = user.id
-    req.reviewed_at = datetime.now(timezone.utc)
+    _apply_decision(req, decision=body.decision, comment=body.comment, user=user)
 
     db.add(
         Decision(

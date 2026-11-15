@@ -286,6 +286,8 @@ class Requirement(Base):
     type: Mapped[str] = mapped_column(String(20))
     text: Mapped[str] = mapped_column(Text)
     priority: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    module: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    clarify_question: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
     source_id: Mapped[int | None] = mapped_column(
         ForeignKey("sources.id", ondelete="SET NULL"), nullable=True

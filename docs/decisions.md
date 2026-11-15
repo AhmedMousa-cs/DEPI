@@ -110,6 +110,16 @@ OCR; meeting recording/transcription; automatic external messages; one independe
   - Fixed cross-project bug: task dependency loading is filtered to this project's task ids. Evals: 4 deterministic scheduling checks on Golden Project B (`evals/tests/test_scheduling_pipeline.py`).
 - **Consequence:** the PM sees the computed schedule and can iterate: reject → fix the plan → re-run → approve; dates only ever land on PM-approved tasks through one audited decision.
 
+### ADR-013: Agent 1 smart review (M4.1) — modules, priorities, clarify questions, bulk decisions, coverage gaps
+- **Status:** Approved
+- **Context:** M4 extracts one requirement per statement with a verified exact quote (ADR-005-era guard kept). Reviewing 30–50 items one by one is the PM's real pain, and nothing tells the PM what the client never mentioned.
+- **Decision:**
+  - Prompt `agent1_extract_v3.md` (v2 kept): every non-decision requirement also gets a short feature-area `module` (reused labels, consistency over cleverness), a `priority` suggestion (high/medium/low; never on decision items) and, for implied/vague items (confidence ≤ 0.8), ONE `clarify_question` for the PM. Schema validates lengths and collapses module whitespace; the deterministic quote-verification and injection guards are untouched.
+  - Persistence: `requirements.module` + `requirements.clarify_question` (migration `d4b7e2c95a61`, chained on `c2a9e1f47b35` — single head). The PM's answer (via edit/decision comment) lands in `pm_comment`, which Agent 2 already reads as context.
+  - Bulk review: `POST /projects/{id}/requirements/decision` `{ids, decision, comment}` applies ONE decision to many rows in a single transaction — one Decision row + one audit row (`bulk: true`) per requirement, 404 (nothing written) if any id is missing or belongs to another project, comment required on reject. The frontend groups requirements by module with per-module "Approve all / Reject all".
+  - Coverage gaps: `GET /projects/{id}/requirements/gaps` — deterministic (no LLM) match of ~11 standard product areas (EN + AR keywords) against the live (non-rejected) requirements' text + quote; missing areas are review-meeting questions, not facts. Shown as chips in the Scope tab.
+- **Consequence:** the PM reviews ~5 groups instead of N items, sees what was never said, and low-confidence items carry their own question — with the same anti-hallucination guarantees as before.
+
 ## Decision Log
 
 | Date | Decision | Reason |
@@ -120,3 +130,4 @@ OCR; meeting recording/transcription; automatic external messages; one independe
 | 2026-11-13 | Agent 2 draft-only, separate review_status (ADR-010) | Keep PM decisions independent of task execution |
 | 2026-11-14 | Agent 2 professional edition: prompt v2, self-correction, context, richer fields (ADR-011) | PM requested "أكثر احترافية"; live Groq eval passes 14/14 thresholds |
 | 2026-11-15 | Agent 3 platform integration: schedule_drafts, PM approval writes dates (ADR-012) | M6 was an unintegrated library; live e2e proves draft → approve → 16/16 dated |
+| 2026-11-15 | Agent 1 smart review: modules, priorities, clarify questions, bulk decisions, coverage gaps (ADR-013) | PM asked for something more useful than item-by-item review; live e2e passes |

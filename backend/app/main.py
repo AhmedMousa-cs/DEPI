@@ -7,6 +7,7 @@ from app.api.jobs import router as jobs_router
 from app.api.planning import router as planning_router
 from app.api.projects import router as projects_router
 from app.api.review import router as review_router
+from app.api.scheduling import router as scheduling_router
 from app.api.scope import router as scope_router
 from app.api.sources import router as sources_router
 from app.api.team import router as team_router
@@ -29,6 +30,7 @@ app.include_router(graph_router)
 app.include_router(review_router)
 app.include_router(scope_router)
 app.include_router(planning_router)
+app.include_router(scheduling_router)
 
 
 @app.get("/health")

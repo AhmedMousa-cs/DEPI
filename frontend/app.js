@@ -6,7 +6,7 @@ const MAX_UPLOAD = 5 * 1024 * 1024;
 const STATUS = { setup: "Setup", planning: "Planning", scope_review: "Scope review", plan_review: "Plan review", active: "Active", closed: "Closed" };
 const KIND = { brief: "Brief", transcript: "Transcript", note: "Note", file: "File" };
 
-const state = { me: null, projects: [], project: null, team: [], leaders: [], page: "portfolio", tab: "overview", modal: null, notice: null, navOpen: false, reqs: [], scope: null, reqFilter: "all", job: null, stories: [], tasks: [], coverage: null, planFilter: "all", planJob: null };
+const state = { me: null, projects: [], project: null, team: [], leaders: [], page: "portfolio", tab: "overview", modal: null, notice: null, navOpen: false, reqs: [], scope: null, gaps: null, reqFilter: "all", job: null, stories: [], tasks: [], coverage: null, planFilter: "all", planJob: null, schedule: null, scheduleJob: null };
 const app = document.getElementById("app");
 const isPM = () => state.me && state.me.role === "PM";
 
@@ -81,9 +81,9 @@ function portfolioView() {
 function projectView() {
   const p = state.project;
   const tabs = [["overview", "Overview"], ["sources", "Sources (" + p.sources.length + ")"], ["team", "Team (" + state.team.length + ")"]];
-  if (isPM()) tabs.push(["scope", "Scope review"], ["plan", "Work plan"]);
+  if (isPM()) tabs.push(["scope", "Scope review"], ["plan", "Work plan"], ["schedule", "Schedule"]);
   const later = ["Updates (M7)", "Decisions (M8)"];
-  return `<div class="workspace-head"><div class="workspace-title"><div class="project-monogram">${esc((p.name || "P")[0].toUpperCase())}</div><div><h1>${esc(p.name)}</h1><p>${esc(p.goal || "No goal added")}</p></div></div><div style="display:flex;gap:8px;align-items:center">${statusBadge(p.status)}${isPM() ? '<button class="btn btn-secondary btn-small" data-action="modal" data-modal="edit-project">Edit project</button>' : ""}</div></div><div class="tabs">${tabs.map(t => `<button class="${state.tab === t[0] ? "active" : ""}" data-action="tab" data-tab="${t[0]}">${esc(t[1])}</button>`).join("")}${later.map(l => `<button disabled style="opacity:.45;cursor:not-allowed" title="Not available yet">${esc(l)}</button>`).join("")}</div>${state.tab === "sources" ? sourcesView() : state.tab === "team" ? teamView() : state.tab === "scope" ? scopeView() : state.tab === "plan" ? planView() : overviewView()}`;
+  return `<div class="workspace-head"><div class="workspace-title"><div class="project-monogram">${esc((p.name || "P")[0].toUpperCase())}</div><div><h1>${esc(p.name)}</h1><p>${esc(p.goal || "No goal added")}</p></div></div><div style="display:flex;gap:8px;align-items:center">${statusBadge(p.status)}${isPM() ? '<button class="btn btn-secondary btn-small" data-action="modal" data-modal="edit-project">Edit project</button>' : ""}</div></div><div class="tabs">${tabs.map(t => `<button class="${state.tab === t[0] ? "active" : ""}" data-action="tab" data-tab="${t[0]}">${esc(t[1])}</button>`).join("")}${later.map(l => `<button disabled style="opacity:.45;cursor:not-allowed" title="Not available yet">${esc(l)}</button>`).join("")}</div>${state.tab === "sources" ? sourcesView() : state.tab === "team" ? teamView() : state.tab === "scope" ? scopeView() : state.tab === "plan" ? planView() : state.tab === "schedule" ? scheduleView() : overviewView()}`;
 }
 
 function overviewView() {
@@ -142,7 +142,7 @@ function modalView() {
 function render() {
   const notice = state.notice; state.notice = null;
   const body = state.page === "project" && state.project ? projectView() : portfolioView();
-  app.innerHTML = `<div class="app-shell">${sidebar()}<div class="main-area">${topbar()}<main class="content">${notice ? noticeHtml(notice) : ""}${body}</main></div></div>${state.modal ? (state.modal.type === "decide-req" ? scopeModal() : state.modal.type === "decide-story" || state.modal.type === "decide-task" ? planModal() : modalView()) : ""}`;
+  app.innerHTML = `<div class="app-shell">${sidebar()}<div class="main-area">${topbar()}<main class="content">${notice ? noticeHtml(notice) : ""}${body}</main></div></div>${state.modal ? (state.modal.type === "decide-req" || state.modal.type === "decide-req-bulk" ? scopeModal() : state.modal.type === "decide-story" || state.modal.type === "decide-task" ? planModal() : state.modal.type === "decide-schedule" ? scheduleModal() : modalView()) : ""}`;
 }
 
 function showModalError(msg) {
@@ -271,6 +271,7 @@ async function reloadScope() {
     api(`/projects/${id}/scope/status`).catch(e => { if (e.message === "unauthorized") throw e; return null; }),
   ]);
   state.reqs = reqs; state.scope = scope;
+  state.gaps = await api(`/projects/${id}/requirements/gaps`).catch(e => { if (e.message === "unauthorized") throw e; return null; });
 }
 
 function pollJob(id) {
@@ -309,7 +310,29 @@ function reqCard(r) {
   const status = r.status === "approved" ? '<span class="badge green">Approved</span>' : r.status === "rejected" ? b("Rejected", "#fde8e8", "#b00020") : '<span class="badge blue">Draft</span>';
   const src = r.source_id ? `<button class="btn btn-quiet btn-small" data-action="view-source" data-id="${r.source_id}">View source</button>` : '<span class="subtle">No source linked</span>';
   const act = r.status === "draft" ? `<div class="item-actions" style="margin:0"><button class="btn btn-primary btn-small" data-action="req-approve" data-id="${r.id}">Approve</button><button class="btn btn-secondary btn-small" data-action="req-edit" data-id="${r.id}">Edit</button><button class="btn btn-danger btn-small" data-action="req-reject" data-id="${r.id}">Reject</button></div>` : "";
-  return `<div class="project-row" style="align-items:flex-start"><div style="flex:1;min-width:0"><div class="project-title">${esc(r.text)}</div><blockquote style="margin:8px 0;padding:6px 10px;border-left:3px solid #dde5ef;font-size:13px;white-space:pre-wrap">${esc(r.quote || "No quote")}</blockquote><div class="row-meta">${status}<span class="badge">${esc(r.type)}</span>${r.priority ? `<span class="badge">${esc(r.priority)}</span>` : ""}${verified}<span class="subtle">Confidence ${pct}%</span>${warn}${src}</div>${r.pm_comment ? `<div class="subtle">PM: ${esc(r.pm_comment)}</div>` : ""}</div>${act}</div>`;
+  const question = r.clarify_question ? `<div class="row-meta" style="margin-top:6px">${b("❓ " + r.clarify_question, "#fff4e5", "#9a5b00")}</div><div class="subtle">Answer it with Edit or a decision comment — your answer reaches Agent 2.</div>` : "";
+  return `<div class="project-row" style="align-items:flex-start"><div style="flex:1;min-width:0"><div class="project-title">${esc(r.text)}</div><blockquote style="margin:8px 0;padding:6px 10px;border-left:3px solid #dde5ef;font-size:13px;white-space:pre-wrap">${esc(r.quote || "No quote")}</blockquote><div class="row-meta">${status}<span class="badge">${esc(r.type)}</span>${r.priority ? `<span class="badge">${esc(r.priority)}</span>` : ""}${verified}<span class="subtle">Confidence ${pct}%</span>${warn}${src}</div>${question}${r.pm_comment ? `<div class="subtle">PM: ${esc(r.pm_comment)}</div>` : ""}</div>${act}</div>`;
+}
+
+function reqGroupHtml(mod, items) {
+  const drafts = items.filter(r => r.status === "draft");
+  const ids = JSON.stringify(drafts.map(r => r.id));
+  const bulk = drafts.length
+    ? `<div class="item-actions" style="margin:10px 0 0"><button class="btn btn-primary btn-small" data-action="req-approve-group" data-ids='${esc(ids)}'>Approve all (${drafts.length})</button><button class="btn btn-danger btn-small" data-action="req-reject-group" data-ids='${esc(ids)}'>Reject all (needs a reason)</button></div>`
+    : "";
+  return `<section class="card section-card" style="margin-bottom:14px"><h2 style="display:flex;align-items:center;gap:8px">${esc(mod)} <span class="badge blue">${items.length}</span></h2>${bulk}<div class="card-body" style="margin-top:${bulk ? "10" : "0"}px"><div class="project-list">${items.map(reqCard).join("")}</div></div></section>`;
+}
+
+function gapsSection() {
+  const g = state.gaps;
+  if (!g || g.empty) return "";
+  const chip = a => a.covered
+    ? `<span class="badge green">✓ ${esc(a.area)}</span>`
+    : `<span class="badge" style="background:#fde8e8;color:#b00020">✗ ${esc(a.area)}</span>`;
+  const verdict = g.missing_count
+    ? `${g.missing_count} area(s) nobody mentioned — good questions for the next client meeting.`
+    : "Every standard area was mentioned in the sources.";
+  return `<section class="card section-card" style="margin-top:16px"><h2>Coverage gaps <span class="badge ${g.missing_count ? "" : "green"}">${g.covered_count}/${g.areas.length} covered</span></h2><p class="section-intro">Deterministic check (no LLM): standard product areas matched against the requirement texts. A missing area is a question for the review meeting, not a fact.</p><div style="display:flex;gap:6px;flex-wrap:wrap">${g.areas.map(chip).join("")}</div><p class="subtle" style="margin-top:8px">${esc(verdict)}</p></section>`;
 }
 
 function scopeView() {
@@ -319,13 +342,23 @@ function scopeView() {
   const jobLine = job ? `<div class="callout${job.status === "failed" ? " warning" : ""}">Extraction job #${esc(job.id)}: <b>${esc(job.status)}</b> (${esc(job.progress)}%)${job.error ? "<br>" + esc(job.error) : ""}</div>` : "";
   const chips = [["all", "All", c.all], ["draft", "To review", c.draft], ["approved", "Approved", c.approved], ["rejected", "Rejected", c.rejected], ["unverified", "Unverified", c.unverified]]
     .map(f => `<button class="btn ${state.reqFilter === f[0] ? "btn-primary" : "btn-secondary"} btn-small" data-action="scope-filter" data-f="${f[0]}">${f[1]} (${f[2]})</button>`).join(" ");
-  const list = filteredReqs().map(reqCard).join("");
+  const groups = [...filteredReqs().reduce((m, r) => {
+    const mod = r.module || "General";
+    if (!m.has(mod)) m.set(mod, []);
+    m.get(mod).push(r);
+    return m;
+  }, new Map())]
+    .sort(([a], [b]) => (a === "General") - (b === "General") || a.localeCompare(b))
+    .map(([mod, items]) => reqGroupHtml(mod, items))
+    .join("");
   const canApprove = c.draft === 0 && c.all > 0;
-  return `<div class="page-head"><div><div class="eyebrow">US02</div><h1>Scope review</h1><p>Each requirement comes with the quote it was extracted from. Approve, edit or reject every draft, then approve the scope.</p></div><div><button class="btn btn-secondary" data-action="run-extract"${running ? " disabled" : ""}>${running ? "Extracting..." : "Run extraction"}</button></div></div>${jobLine}<div class="callout">Gate: <b>${esc(gate)}</b> · Project status: <b>${esc(sc ? sc.project_status : state.project.status)}</b></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin:12px 0">${chips}</div><section class="card"><div class="card-body">${list ? `<div class="project-list">${list}</div>` : '<div class="empty"><div class="empty-icon">◈</div><h3>No requirements here</h3><p>Run the extraction, or change the filter.</p></div>'}</div></section><section class="card section-card" style="margin-top:16px"><h2>Approve scope</h2><p class="section-intro">Every requirement must be decided first.</p><div class="form-grid">${field("Comment (optional)", '<input id="scope-comment" maxlength="2000">', true)}</div><div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-primary" data-action="approve-scope"${canApprove ? "" : " disabled"}>Approve scope</button><button class="btn btn-quiet" data-action="open-gate">Re-open gate</button></div>${canApprove ? "" : `<p class="subtle">${c.all === 0 ? "Run the extraction first." : c.draft + " draft(s) still need a decision."}</p>`}</section>`;
+  return `<div class="page-head"><div><div class="eyebrow">US02</div><h1>Scope review</h1><p>Requirements grouped by feature area. Approve a whole module in one click, or drill into any item.</p></div><div><button class="btn btn-secondary" data-action="run-extract"${running ? " disabled" : ""}>${running ? "Extracting..." : "Run extraction"}</button></div></div>${jobLine}<div class="callout">Gate: <b>${esc(gate)}</b> · Project status: <b>${esc(sc ? sc.project_status : state.project.status)}</b></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin:12px 0">${chips}</div>${groups ? groups : '<section class="card"><div class="card-body"><div class="empty"><div class="empty-icon">◈</div><h3>No requirements here</h3><p>Run the extraction, or change the filter.</p></div></div></section>'}${gapsSection()}<section class="card section-card" style="margin-top:16px"><h2>Approve scope</h2><p class="section-intro">Every requirement must be decided first.</p><div class="form-grid">${field("Comment (optional)", '<input id="scope-comment" maxlength="2000">', true)}</div><div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-primary" data-action="approve-scope"${canApprove ? "" : " disabled"}>Approve scope</button><button class="btn btn-quiet" data-action="open-gate">Re-open gate</button></div>${canApprove ? "" : `<p class="subtle">${c.all === 0 ? "Run the extraction first." : c.draft + " draft(s) still need a decision."}</p>`}</section>`;
 }
 
 function scopeModal() {
   const m = state.modal, r = m.req;
+  if (m.type === "decide-req-bulk")
+    return modalShell("Reject a whole module", `${m.ids.length} requirement(s) will be rejected. No dates, no stories — nothing is lost, you can re-run the extraction.`, "decide-req-bulk", field("Reason *", '<textarea name="comment" required></textarea>', true), "Reject all");
   if (m.mode === "rejected")
     return modalShell("Reject requirement", r.text, "decide-req", field("Reason *", '<textarea name="comment" required></textarea>', true), "Reject");
   const types = REQ_TYPES.includes(r.type) ? REQ_TYPES : REQ_TYPES.concat(r.type);
@@ -355,6 +388,14 @@ Object.assign(actions, {
         if (active) { state.planJob = active; pollPlanJob(active.id); }
       } catch (e) { if (e.message === "unauthorized") throw e; }
     }
+    if (t.dataset.tab === "schedule") {
+      await reloadSchedule();
+      try {
+        const jobs = await api(`/projects/${state.project.id}/jobs`);
+        const active = jobs.find(j => j.type === "agent3.schedule" && ["queued", "running"].includes(j.status));
+        if (active) { state.scheduleJob = active; pollScheduleJob(active.id); }
+      } catch (e) { if (e.message === "unauthorized") throw e; }
+    }
     baseTab(t);
   },
   "scope-filter": t => { state.reqFilter = t.dataset.f; render(); },
@@ -364,6 +405,13 @@ Object.assign(actions, {
   },
   "req-reject": t => { state.modal = { type: "decide-req", mode: "rejected", req: reqById(t.dataset.id) }; render(); },
   "req-edit": t => { state.modal = { type: "decide-req", mode: "modified", req: reqById(t.dataset.id) }; render(); },
+  "req-approve-group": async t => {
+    const ids = JSON.parse(t.dataset.ids);
+    if (!ids.length || !confirm(`Approve ${ids.length} requirement(s) in this module?`)) return;
+    await post(`/projects/${state.project.id}/requirements/decision`, { ids, decision: "approved" });
+    await reloadScope(); state.notice = { type: "ok", text: `${ids.length} requirement(s) approved.` }; render();
+  },
+  "req-reject-group": t => { state.modal = { type: "decide-req-bulk", ids: JSON.parse(t.dataset.ids) }; render(); },
   "run-extract": async () => {
     if (!confirm("Run extraction? New draft requirements will be added for review.")) return;
     const job = await post(`/projects/${state.project.id}/jobs`, { type: "agent1.extract" });
@@ -392,6 +440,12 @@ Object.assign(submitters, {
     await post(`/projects/${state.project.id}/requirements/${m.req.id}/decision`, body);
     state.modal = null; await reloadScope();
     state.notice = { type: "ok", text: m.mode === "rejected" ? "Requirement rejected." : "Requirement updated." }; render();
+  },
+  "decide-req-bulk": async form => {
+    const m = state.modal, d = new FormData(form);
+    await post(`/projects/${state.project.id}/requirements/decision`, { ids: m.ids, decision: "rejected", comment: String(d.get("comment") || "").trim() });
+    state.modal = null; await reloadScope();
+    state.notice = { type: "ok", text: `${m.ids.length} requirement(s) rejected.` }; render();
   },
 });
 
@@ -438,7 +492,9 @@ function planTaskRow(t) {
   const actions = t.review_status === "draft"
     ? `<div class="item-actions" style="margin:0"><button class="btn btn-primary btn-small" data-action="task-approve" data-id="${t.id}">Approve</button><button class="btn btn-secondary btn-small" data-action="task-edit" data-id="${t.id}">Edit</button><button class="btn btn-danger btn-small" data-action="task-reject" data-id="${t.id}">Reject</button></div>`
     : "";
-  return `<div class="project-row" style="align-items:flex-start"><div style="flex:1;min-width:0"><div class="project-title">${esc(t.title)} ${planBadge(t.review_status)}</div><div class="row-meta"><span class="badge">${esc(t.estimate_hours)} h</span><span class="badge">${esc(t.status)}</span><span class="subtle">Confidence ${Math.round((Number(t.confidence) || 0) * 100)}%</span>${deps ? `<span class="subtle">Depends on:</span> ${deps}` : ""}</div>${t.pm_comment ? `<div class="subtle">PM: ${esc(t.pm_comment)}</div>` : ""}</div>${actions}</div>`;
+  const order = t.plan_order ? `<span class="badge">Step ${esc(t.plan_order)}</span>` : "";
+  const critical = t.is_critical ? '<span class="badge" style="background:#fff4e5;color:#9a5b00">Critical path</span>' : "";
+  return `<div class="project-row" style="align-items:flex-start"><div style="flex:1;min-width:0"><div class="project-title">${esc(t.title)} ${planBadge(t.review_status)}${critical}</div><div class="row-meta">${order}<span class="badge">${esc(t.estimate_hours)} h</span><span class="badge">${esc(t.status)}</span><span class="subtle">Confidence ${Math.round((Number(t.confidence) || 0) * 100)}%</span>${deps ? `<span class="subtle">Depends on:</span> ${deps}` : ""}</div>${t.rationale ? `<div class="subtle">Why: ${esc(t.rationale)}</div>` : ""}${t.pm_comment ? `<div class="subtle">PM: ${esc(t.pm_comment)}</div>` : ""}</div>${actions}</div>`;
 }
 
 function planStoryCard(s) {
@@ -447,8 +503,9 @@ function planStoryCard(s) {
   const actions = s.review_status === "draft"
     ? `<div class="item-actions" style="margin:8px 0 0"><button class="btn btn-primary btn-small" data-action="story-approve" data-id="${s.id}">Approve</button><button class="btn btn-secondary btn-small" data-action="story-edit" data-id="${s.id}">Edit</button><button class="btn btn-danger btn-small" data-action="story-reject" data-id="${s.id}">Reject</button></div>`
     : "";
+  const order = s.plan_order ? `<span class="badge">Order ${esc(s.plan_order)}</span>` : "";
   const taskBlock = tasks.length ? `<div class="project-list" style="margin-top:10px">${tasks.map(planTaskRow).join("")}</div>` : '<p class="subtle" style="margin:10px 0 0">No tasks under this story (or hidden by the filter).</p>';
-  return `<div class="project-row" style="display:block;align-items:stretch"><div class="project-title">${esc(s.text)} ${planBadge(s.review_status)}</div><div class="row-meta"><span class="badge">Requirement #${s.requirement_id}</span><span class="subtle">Confidence ${Math.round((Number(s.confidence) || 0) * 100)}%</span></div><div class="subtle">${esc(reqLabel(s.requirement_id))}</div>${criteria ? `<ul style="margin:8px 0 0 18px;font-size:13px">${criteria}</ul>` : ""}${actions}${taskBlock}</div>`;
+  return `<div class="project-row" style="display:block;align-items:stretch"><div class="project-title">${esc(s.text)} ${planBadge(s.review_status)}</div><div class="row-meta">${order}<span class="badge">Requirement #${s.requirement_id}</span><span class="subtle">Confidence ${Math.round((Number(s.confidence) || 0) * 100)}%</span></div><div class="subtle">${esc(reqLabel(s.requirement_id))}</div>${criteria ? `<ul style="margin:8px 0 0 18px;font-size:13px">${criteria}</ul>` : ""}${actions}${taskBlock}</div>`;
 }
 
 function coverageSection(c) {
@@ -534,5 +591,141 @@ Object.assign(submitters, {
     await post(`/projects/${state.project.id}/tasks/${m.item.id}/decision`, body);
     state.modal = null; await reloadPlan();
     state.notice = { type: "ok", text: m.mode === "rejected" ? "Task rejected." : "Task edited and approved." }; render();
+  },
+});
+
+/* ===== Schedule / Agent 3 (M6.1) ===== */
+let scheduleTimer = null;
+
+async function reloadSchedule() {
+  const id = state.project.id;
+  const [draft, tasks] = await Promise.all([
+    api(`/projects/${id}/scheduling`).catch(e => { if (e.message === "unauthorized") throw e; return null; }),
+    api(`/projects/${id}/tasks`),
+  ]);
+  state.schedule = draft; state.tasks = tasks;
+}
+
+function pollScheduleJob(id) {
+  clearInterval(scheduleTimer);
+  const tick = async () => {
+    try {
+      const j = await api(`/jobs/${id}`);
+      state.scheduleJob = j;
+      const finished = ["done", "failed", "cancelled", "waiting_for_pm"].includes(j.status);
+      if (finished) clearInterval(scheduleTimer);
+      if (state.page === "project" && state.tab === "schedule") {
+        if (finished) await reloadSchedule();
+        if (!state.modal) render();
+      }
+    } catch (e) { clearInterval(scheduleTimer); }
+  };
+  tick(); scheduleTimer = setInterval(tick, 3000);
+}
+
+const scheduleBadge = s => s === "approved" ? '<span class="badge green">Approved</span>' : s === "rejected" ? '<span class="badge" style="background:#fde8e8;color:#b00020">Rejected</span>' : s === "superseded" ? '<span class="badge">Superseded</span>' : '<span class="badge blue">Draft</span>';
+const estimateBadge = s => s === "llm" ? '<span class="badge blue">LLM</span>' : s === "pm" ? '<span class="badge green">PM</span>' : '<span class="badge">Hours→days</span>';
+const memberName = id => { const m = state.team.find(x => String(x.id) === String(id)); return m ? m.name : null; };
+
+function scheduleTaskRow(t, titles) {
+  const assignee = t.assignee_id ? memberName(t.assignee_id) : null;
+  const critical = t.is_critical ? '<span class="badge" style="background:#fff4e5;color:#9a5b00">Critical</span>' : "";
+  const float = t.total_float > 0 ? `<span class="subtle">Float: ${esc(t.total_float)} working day${t.total_float === 1 ? "" : "s"}</span>` : '<span class="subtle">Float: 0 (critical)</span>';
+  return `<div class="project-row"><div style="flex:1;min-width:0"><div class="project-title">${esc(titles[t.id] || t.title || "Task #" + t.id)} ${critical}</div><div class="row-meta"><span class="badge">${esc(fmtDate(t.start_date))} → ${esc(fmtDate(t.end_date))}</span><span class="badge">${esc(t.duration_days)} working day${t.duration_days === 1 ? "" : "s"}</span><span class="badge">${esc(assignee || "Unassigned")}</span>${float}</div></div></div>`;
+}
+
+function conflictRow(c, titles) {
+  const tasks = c.task_ids.map(id => titles[id] || "Task #" + id).join(", ");
+  const ratio = c.overload_ratio != null ? ` · peak ${(Number(c.overload_ratio) * 100).toFixed(0)}% of capacity` : "";
+  return `<div class="project-row"><div><div class="project-title"><span class="badge" style="background:#fde8e8;color:#b00020">${esc(c.kind === "overallocation" ? "Overallocation" : "Outside availability")}</span> ${esc(memberName(c.assignee_id) || c.assignee_id)}</div><div class="row-meta"><span class="subtle">${esc(tasks)}</span><span class="subtle">${esc(fmtDate(c.start_date))} → ${esc(fmtDate(c.end_date))}</span><span class="subtle">${esc(c.working_days)} working day${c.working_days === 1 ? "" : "s"}${ratio}</span></div></div></div>`;
+}
+
+function scheduleView() {
+  const d = state.schedule;
+  const job = state.scheduleJob;
+  const running = job && ["queued", "running"].includes(job.status);
+  const schedulable = ["planning", "plan_review", "active"].includes(state.project.status) && state.tasks.some(t => t.review_status === "approved");
+  const jobLine = job ? `<div class="callout${job.status === "failed" ? " warning" : ""}">Scheduling job #${esc(job.id)}: <b>${esc(job.status)}</b> (${esc(job.progress)}%)${job.error ? "<br>" + esc(job.error) : ""}</div>` : "";
+  const hint = !schedulable ? `<p class="subtle">Agent 3 needs the work plan approved: review the plan tasks first (project status: ${esc(state.project.status)}).</p>` : "";
+
+  const head = `<div class="page-head"><div><div class="eyebrow">Agent 3</div><h1>Schedule</h1><p>Deterministic dates, critical path, resource conflicts and capacity. Task dates are written only when you approve the draft.</p></div><div><button class="btn btn-primary" data-action="run-schedule"${running || !schedulable ? " disabled" : ""}>${running ? "Scheduling..." : "Run Agent 3"}</button>${hint}</div></div>`;
+  if (!d) return `${head}${jobLine}<section class="card"><div class="card-body"><div class="empty"><div class="empty-icon">◷</div><h3>No schedule yet</h3><p>Approve the work plan tasks, then run Agent 3 to compute the project schedule.</p></div></div></section>`;
+
+  const p = d.payload || {};
+  const schedule = p.schedule || { tasks: [], critical_path: [], project_start: d.project_start, project_end: d.project_end, total_duration_days: d.total_duration_days };
+  const titles = {};
+  schedule.tasks.forEach(t => { titles[t.id] = t.title || state.tasks.find(x => String(x.id) === String(t.id))?.title || "Task #" + t.id; });
+  const conflicts = p.conflicts || [];
+  const capacity = p.capacity || { members: [], total_available_hours: 0, total_assigned_hours: 0 };
+  const explanation = p.explanation || {};
+  const decisions = d.review_status === "draft"
+    ? `<div class="item-actions" style="margin-top:12px"><button class="btn btn-primary" data-action="schedule-approve">Approve & write dates</button><button class="btn btn-secondary" data-action="schedule-reject">Reject</button></div><p class="subtle" style="margin-top:6px">Approving writes start/end dates on every task (PM-locked tasks are skipped). Rejecting keeps the plan undated.</p>`
+    : d.review_status === "rejected"
+      ? `<div class="callout warning" style="margin-top:12px">Rejected${d.pm_comment ? ": " + esc(d.pm_comment) : ""}. Re-run Agent 3 after fixing the plan.</div>`
+      : `<div class="callout" style="margin-top:12px">Approved${d.pm_comment ? ": " + esc(d.pm_comment) : ""}. Task dates are live in the plan.</div>`;
+
+  const chain = (schedule.critical_path || []).map(id => esc(titles[id] || id)).join(' <span class="subtle">→</span> ');
+  const taskRows = schedule.tasks.map(t => scheduleTaskRow(t, titles)).join("");
+  const conflictRows = conflicts.map(c => conflictRow(c, titles)).join("");
+  const capacityRows = (capacity.members || []).map(m => {
+    const util = m.utilization == null ? "—" : Math.round(Number(m.utilization) * 100) + "%";
+    const avail = m.available_days ? `${esc(m.available_days)} days · ${esc(Math.round(Number(m.available_hours)))} h available` : "No availability in this window";
+    return `<div class="project-row"><div><div class="project-title">${esc(m.name || m.member_id)} ${m.is_overloaded ? '<span class="badge" style="background:#fde8e8;color:#b00020">Overloaded</span>' : ""}</div><div class="row-meta"><span class="badge">${esc(m.hours_per_day)} h/day</span><span class="badge">Utilization ${esc(util)}</span><span class="subtle">${avail}</span><span class="subtle">${esc(Math.round(Number(m.assigned_hours)))} h assigned</span></div></div></div>`;
+  }).join("");
+  const estimateRows = (p.estimates || []).map(e => {
+    const hours = state.tasks.find(x => String(x.id) === String(e.task_id));
+    return `<div class="project-row"><div><div class="project-title">${esc(titles[e.task_id] || "Task #" + e.task_id)} ${estimateBadge(e.source)}</div><div class="row-meta"><span class="badge">${esc(e.duration_days)} working day${e.duration_days === 1 ? "" : "s"}</span>${hours ? `<span class="subtle">${esc(hours.estimate_hours)} h estimate</span>` : ""}${e.rationale ? `<span class="subtle">Why: ${esc(e.rationale)}</span>` : ""}</div></div></div>`;
+  }).join("");
+  const explainLines = [explanation.summary, explanation.critical_path].filter(Boolean).map(x => `<p style="margin:6px 0">${esc(x)}</p>`).join("");
+  const explainList = (explanation.conflicts || []).concat(explanation.estimates || []).map(x => `<li>${esc(x)}</li>`).join("");
+  const explainSource = explanation.source === "template" ? '<span class="badge">Template wording</span>' : explanation.source === "llm" ? '<span class="badge blue">LLM wording</span>' : "";
+
+  return `${head}${jobLine}
+<div class="grid two-col">
+  <section class="card section-card"><h2>Summary ${scheduleBadge(d.review_status)}</h2><p class="section-intro">Computed by code (CPM over working days, Fri+Sat weekend). The LLM never produces dates.</p>
+    <div class="keyvals">${kv("Project start", fmtDate(schedule.project_start))}${kv("Project end", fmtDate(schedule.project_end))}${kv("Total duration", schedule.total_duration_days + " working days")}${kv("Tasks scheduled", String(schedule.tasks.length))}${kv("Conflicts", String(conflicts.length))}</div>
+    ${decisions}
+  </section>
+  <section class="card section-card"><h2>Why this schedule ${explainSource}</h2><p class="section-intro">${explanation.source === "template" ? "Deterministic template (the LLM was unavailable)." : "Written by the LLM from numbers the code computed — it cannot change them."}</p>
+    ${explainLines || '<p class="subtle">No explanation stored.</p>'}${explainList ? `<ul style="margin:8px 0 0 18px;font-size:13px">${explainList}</ul>` : ""}
+    <p class="subtle" style="margin-top:10px">Draft #${esc(d.id)} · created ${esc(fmtDateTime(d.created_at))}${d.reviewed_at ? " · decided " + esc(fmtDateTime(d.reviewed_at)) : ""}</p>
+  </section>
+</div>
+<section class="card section-card"><h2>Critical path</h2><p class="section-intro">One representative chain with zero float. Any delay here moves the project end.</p>
+  ${chain ? `<p style="margin:4px 0">${chain}</p>` : '<p class="subtle">No critical chain stored.</p>'}
+</section>
+<section class="card section-card"><h2>Tasks (${schedule.tasks.length})</h2><div class="card-body"><div class="project-list">${taskRows}</div></div></section>
+<section class="card section-card"><h2>Resource conflicts</h2>${conflicts.length ? `<div class="card-body"><div class="project-list">${conflictRows}</div></div>` : '<div class="card-body"><div class="callout">No resource conflicts: nobody is overallocated and every task fits its assignee availability.</div></div>'}</section>
+<section class="card section-card"><h2>Team capacity</h2><div class="card-body"><div class="project-list">${capacityRows || '<div class="empty"><div class="empty-icon">☺</div><h3>No members</h3><p>Add team members to see capacity.</p></div>'}</div></div></section>
+<section class="card section-card"><h2>How durations were estimated</h2><p class="section-intro">PM duration &gt; hours→days conversion &gt; LLM initial estimate (validated by code).</p><div class="card-body"><div class="project-list">${estimateRows}</div></div></section>`;
+}
+
+function scheduleModal() {
+  return modalShell("Reject schedule", "No task dates will be written. Explain what should change before re-running Agent 3.", "decide-schedule",
+    field("Reason *", '<textarea name="comment" required></textarea>', true), "Reject");
+}
+
+Object.assign(actions, {
+  "run-schedule": async () => {
+    if (!confirm("Run Agent 3? It computes a draft schedule (dates, critical path, conflicts, capacity). Task dates change only when you approve the draft.")) return;
+    const job = await post(`/projects/${state.project.id}/jobs`, { type: "agent3.schedule" });
+    state.scheduleJob = job; render(); pollScheduleJob(job.id);
+  },
+  "schedule-approve": async () => {
+    const d = state.schedule;
+    if (!confirm("Approve this schedule? Start/end dates are written on every task except PM-locked ones.")) return;
+    await post(`/projects/${state.project.id}/scheduling/${d.id}/decision`, { decision: "approved" });
+    await reloadSchedule(); await reloadPlan();
+    state.notice = { type: "ok", text: "Schedule approved and task dates written." }; render();
+  },
+  "schedule-reject": () => { state.modal = { type: "decide-schedule" }; render(); },
+});
+
+Object.assign(submitters, {
+  "decide-schedule": async form => {
+    const d = new FormData(form);
+    await post(`/projects/${state.project.id}/scheduling/${state.schedule.id}/decision`, { decision: "rejected", comment: String(d.get("comment") || "").trim() });
+    state.modal = null; await reloadSchedule();
+    state.notice = { type: "ok", text: "Schedule rejected. No dates were written." }; render();
   },
 });

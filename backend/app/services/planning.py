@@ -44,7 +44,7 @@ def get_approved_requirements(db: Session, project_id: int) -> list[dict]:
         .order_by(Requirement.id)
     )
     return [
-        {"id": r.id, "type": r.type, "text": r.text, "priority": r.priority}
+        {"id": r.id, "type": r.type, "text": r.text, "priority": r.priority, "pm_comment": r.pm_comment}
         for r in rows
     ]
 
@@ -164,6 +164,7 @@ def save_draft_plan(
             text=item.text,
             acceptance_criteria=list(item.acceptance_criteria),
             confidence=item.confidence,
+            plan_order=item.order,
             review_status="draft",
             locked_by_pm=False,
             run_id=run_id,
@@ -201,8 +202,10 @@ def save_draft_plan(
             estimate_hours=item.estimate_hours,
             status="todo",
             progress_pct=0,
-            is_critical=False,
+            is_critical=item.is_critical,
             confidence=item.confidence,
+            plan_order=item.order,
+            rationale=item.rationale,
             review_status="draft",
             locked_by_pm=False,
             run_id=run_id,

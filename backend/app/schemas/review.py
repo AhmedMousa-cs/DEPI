@@ -20,6 +20,8 @@ class RequirementOut(BaseModel):
     type: str
     text: str
     priority: str | None
+    module: str | None
+    clarify_question: str | None
     status: str
     source_id: int | None
     quote: str | None
@@ -58,4 +60,25 @@ class RequirementDecision(BaseModel):
                 raise ValueError("text/type/priority can only be sent with decision=modified")
             if self.decision == "rejected" and not self.comment:
                 raise ValueError("a comment is required when rejecting")
+        return self
+
+
+class BulkRequirementDecision(BaseModel):
+    """One PM decision applied to many requirements at once (module-level review).
+
+    Note: bulk applies the SAME decision to every id; edits stay per-item.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    ids: list[int] = Field(min_length=1, max_length=200)
+    decision: Literal["approved", "rejected"]
+    comment: str = Field(default="", max_length=2000)
+
+    @model_validator(mode="after")
+    def _rules(self):
+        if len(set(self.ids)) != len(self.ids):
+            raise ValueError("ids must be unique")
+        if self.decision == "rejected" and not self.comment:
+            raise ValueError("a comment is required when rejecting")
         return self

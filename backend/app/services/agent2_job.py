@@ -8,8 +8,9 @@ import logging
 from sqlalchemy import select
 
 from app.agents import agent2_plan
+from app.agents.agent2_plan import PlanningContext
 from app.audit import write_audit
-from app.db.models import Job, Project
+from app.db.models import Job, Project, Requirement, Source
 from app.db.session import SessionLocal
 from app.services.jobs import JobContext, PermanentJobError, register
 from app.services.planning import get_approved_requirements, save_draft_plan
@@ -19,7 +20,7 @@ log = logging.getLogger("nexus.agent2_job")
 PLANNABLE_STATUSES = ("planning", "plan_review")
 
 
-def _load(job_id: int) -> tuple[int, str, list[dict]]:
+def _load(job_id: int) -> tuple[int, str, list[dict], PlanningContext]:
     with SessionLocal() as db:
         job = db.get(Job, job_id)
         if job is None:
@@ -28,12 +29,29 @@ def _load(job_id: int) -> tuple[int, str, list[dict]]:
         if project is None:
             raise PermanentJobError("project not found")
         requirements = get_approved_requirements(db, project.id)
-        return project.id, project.status, requirements
+        # Background for the agent: the brief, the transcript and what the PM wrote at scope review.
+        brief = db.scalar(
+            select(Source.content_text).where(Source.project_id == project.id, Source.kind == "brief")
+        )
+        transcript = db.scalar(
+            select(Source.content_text).where(Source.project_id == project.id, Source.kind == "transcript")
+        )
+        pm_decisions = tuple(
+            f"Requirement {r['id']}: {r['pm_comment']}"
+            for r in requirements
+            if r.get("pm_comment")
+        )
+        return (
+            project.id,
+            project.status,
+            requirements,
+            PlanningContext(brief=brief, transcript=transcript, pm_decisions=pm_decisions),
+        )
 
 
 @register("agent2.plan")
 def run_agent2_plan(ctx: JobContext, params: dict) -> str:
-    project_id, status, requirements = _load(ctx.job_id)
+    project_id, status, requirements, context = _load(ctx.job_id)
     if status not in PLANNABLE_STATUSES:
         raise PermanentJobError(
             f"Agent 2 needs an approved scope (project status is '{status}'); approve the scope first."
@@ -44,7 +62,7 @@ def run_agent2_plan(ctx: JobContext, params: dict) -> str:
 
     flagged = agent2_plan.injection_flags(requirements)
     run = agent2_plan.generate_plan(
-        project_id=project_id, requirements=requirements, job_id=ctx.job_id
+        project_id=project_id, requirements=requirements, context=context, job_id=ctx.job_id
     )
     ctx.heartbeat(progress=80)
 
@@ -69,6 +87,7 @@ def run_agent2_plan(ctx: JobContext, params: dict) -> str:
                 "tasks_drafted": len(saved.tasks),
                 "dependencies_created": saved.dependencies,
                 "skipped_protected": saved.skipped_protected,
+                "plan_soft_issues": run.soft_issues,
                 "flagged_requirements": {str(rid): flags for rid, flags in flagged.items()},
             },
         )

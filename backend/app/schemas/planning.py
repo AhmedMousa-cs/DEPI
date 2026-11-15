@@ -45,6 +45,7 @@ class AgentStory(BaseModel):
     text: str = Field(min_length=10, max_length=500)
     acceptance_criteria: list[str] = Field(min_length=1, max_length=8)
     confidence: float = Field(ge=0, le=1)
+    order: int | None = Field(default=None, ge=1, le=200)
 
     @model_validator(mode="after")
     def _criteria(self):
@@ -65,6 +66,9 @@ class AgentTask(BaseModel):
     estimate_hours: float = Field(ge=MIN_ESTIMATE_HOURS, le=MAX_ESTIMATE_HOURS)
     depends_on: list[str] = Field(default_factory=list, max_length=20)
     confidence: float = Field(ge=0, le=1)
+    order: int | None = Field(default=None, ge=1, le=200)
+    is_critical: bool = False
+    rationale: str | None = Field(default=None, max_length=300)
 
     @model_validator(mode="after")
     def _dependencies(self):
@@ -72,6 +76,8 @@ class AgentTask(BaseModel):
             raise ValueError("a task cannot depend on itself")
         if len(set(self.depends_on)) != len(self.depends_on):
             raise ValueError("depends_on must not contain duplicates")
+        if self.rationale is not None and not 5 <= len(self.rationale.strip()) <= 300:
+            raise ValueError("rationale must be 5..300 characters")
         return self
 
 
@@ -101,6 +107,15 @@ class PlanningOutput(BaseModel):
         cycle = find_cycle(edges)
         if cycle:
             raise ValueError(f"dependency cycle detected among {cycle}")
+        # order (when provided) must be a clean sequence: unique per scope/story, so the PM can read
+        # the plan as a schedule instead of guessing.
+        story_orders = [s.order for s in self.stories if s.order is not None]
+        if len(set(story_orders)) != len(story_orders):
+            raise ValueError("story order values must be unique")
+        for ref in {t.story_ref for t in self.tasks}:
+            task_orders = [t.order for t in self.tasks if t.story_ref == ref and t.order is not None]
+            if len(set(task_orders)) != len(task_orders):
+                raise ValueError(f"task order values must be unique inside story {ref}")
         return self
 
 
@@ -124,6 +139,7 @@ class StoryOut(BaseModel):
     reviewed_by: int | None
     reviewed_at: datetime | None
     created_at: datetime
+    plan_order: int | None = None
 
 
 class TaskOut(BaseModel):
@@ -150,6 +166,8 @@ class TaskOut(BaseModel):
     reviewed_at: datetime | None
     created_at: datetime
     depends_on: list[int] = Field(default_factory=list)
+    plan_order: int | None = None
+    rationale: str | None = None
 
 
 class StoryDecision(BaseModel):

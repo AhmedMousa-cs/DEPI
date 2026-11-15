@@ -63,6 +63,9 @@ def save_draft_requirements(
             quote=req.exact_quote,
             quote_verified=item.quote_verified,
             confidence=item.confidence,  # already capped for unverified quotes
+            module=req.module,
+            priority=req.priority,
+            clarify_question=req.clarify_question,
             run_id=run_id,
             created_by_agent=agent,
             status="draft",

@@ -99,6 +99,17 @@ OCR; meeting recording/transcription; automatic external messages; one independe
   - Golden Project B bumped to version 2 with four new thresholds (`ordering`, `priority_first`, `critical_path`, `rationale`, all must be true); live Groq run passes 14/14 (`evals/results/agent2-project-b-20261114T200438Z-6afd6007.json`, total_hours_ratio 0.03).
 - **Consequence:** a planning job may take up to ~3× longer (correction passes), but a plan that cannot be executed never reaches review, and plans now carry an explicit schedule, backbone and rationale the PM can judge.
 
+### ADR-012: Agent 3 platform integration (M6.1) — draft schedule table, PM approval writes dates
+- **Status:** Approved
+- **Context:** M6 merged a professional scheduling *library* (CPM, conflicts, capacity, prompts, ~117 tests) with no job handler, API, frontend, persistence or evals — `run_agent3` was unreachable from the app and its LLM calls bypassed `run_structured`.
+- **Decision:**
+  - New `schedule_drafts` table (migration `c2a9e1f47b35`, chained on `9d5c1e8a2b74` to keep a single Alembic head): `payload` JSON = the full `Agent3Output` dump, plus `project_start/project_end/total_duration_days/conflicts_count/run_ids/review_status/pm_comment/created_by_agent`. Agents write ONLY drafts.
+  - Job handler `@register("agent3.schedule")`: refuses when the project has no tasks ("run Agent 2 first") or none is PM-approved — the real plan gate is `tasks.review_status == "approved"`, not a project status (nothing ever sets `plan_review`). Every LLM call goes through a `BudgetedLLM` adapter wrapping `run_structured` (budget, agent_runs, audit, Langfuse); in the normal flow only the explanation is LLM worded, with a deterministic template fallback. Audit action `agent3.scheduling_completed`.
+  - PM approval (`POST /projects/{id}/scheduling/{draft_id}/decision`) is the ONLY way `tasks.start/end` are written: exclusively on tasks with `review_status == "approved"` (drafts/rejected stay undated). Note: `locked_by_pm` is set by ANY PM decision and only stops agents from overwriting PM-reviewed content on re-runs — it does not block schedule dating. Rejecting requires a comment. Re-deciding or deciding an older draft → 409; re-runs supersede previous drafts (approved ones stay as history).
+  - API is PM-only: `GET /projects/{id}/scheduling` (latest non-superseded draft, 404 until Agent 3 runs) + the decision endpoint. Frontend "Schedule" tab: run button (enabled once plan tasks are approved), job polling, summary/critical path/per-task dates+float/conflicts/capacity/estimates, LLM-vs-template wording badge, approve/reject flow.
+  - Fixed cross-project bug: task dependency loading is filtered to this project's task ids. Evals: 4 deterministic scheduling checks on Golden Project B (`evals/tests/test_scheduling_pipeline.py`).
+- **Consequence:** the PM sees the computed schedule and can iterate: reject → fix the plan → re-run → approve; dates only ever land on PM-approved tasks through one audited decision.
+
 ## Decision Log
 
 | Date | Decision | Reason |
@@ -108,3 +119,4 @@ OCR; meeting recording/transcription; automatic external messages; one independe
 | 2026-10-30 | Graph decider taken from JWT | Prevent PM impersonation |
 | 2026-11-13 | Agent 2 draft-only, separate review_status (ADR-010) | Keep PM decisions independent of task execution |
 | 2026-11-14 | Agent 2 professional edition: prompt v2, self-correction, context, richer fields (ADR-011) | PM requested "أكثر احترافية"; live Groq eval passes 14/14 thresholds |
+| 2026-11-15 | Agent 3 platform integration: schedule_drafts, PM approval writes dates (ADR-012) | M6 was an unintegrated library; live e2e proves draft → approve → 16/16 dated |

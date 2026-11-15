@@ -399,3 +399,36 @@ class Decision(Base):
     decided_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class ScheduleDraft(Base):
+    """Agent 3 draft schedule (M6.1).
+
+    The agent computes dates/conflicts/capacity and stores them HERE as a draft.
+    tasks.start / tasks.end are written only when the PM approves a draft; agents
+    never write the shared task rows directly.
+    """
+
+    __tablename__ = "schedule_drafts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    # every agent_run that contributed (estimate batches + explanation)
+    run_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
+    # the full Agent3Output dump: schedule, conflicts, capacity, estimates, explanation
+    payload: Mapped[dict] = mapped_column(JSON)
+    project_start: Mapped[date] = mapped_column(Date)
+    project_end: Mapped[date] = mapped_column(Date)
+    total_duration_days: Mapped[int] = mapped_column(Integer)
+    conflicts_count: Mapped[int] = mapped_column(Integer, default=0)
+    # draft | approved | rejected | superseded (a newer draft replaced this one)
+    review_status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
+    pm_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_agent: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

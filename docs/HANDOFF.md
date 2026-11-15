@@ -4,6 +4,7 @@
 M0-M3 code is on branch fix/m0-m3-closure. A milestone is DONE only with evidence recorded below.
 M4 (Agent 1) and M5 (Agent 2: stories & tasks) are on branch feature/m5-agent2-stories-tasks.
 M5.1 (Agent 2 professional edition) is on branch feature/agent2-v2-professional (stacked on M5).
+M6.1 (Agent 3 platform integration) is on branch feature/m6-agent3-integration (stacked on M5.1).
 
 ## M5 evidence (Agent 2 - stories & tasks)
 - [x] full backend suite in the container (Python 3.11): 284 passed
@@ -27,6 +28,16 @@ M5.1 (Agent 2 professional edition) is on branch feature/agent2-v2-professional 
 - [x] `LLM_MAX_TOKENS_PER_JOB` 12000 → 80000 (worst case = 6 model calls; the old value rejected every real planning job)
 - [x] live Groq run (`python -m evals.run_agent2 --golden project-b --strict`): all 14 thresholds pass, saved as `evals/results/agent2-project-b-20261114T200438Z-6afd6007.json`
       (ordering true, priority_first true, critical_path true — 6/30 critical, rationale true, total_hours_ratio 0.03)
+
+## M6.1 evidence (Agent 3 platform integration)
+- [x] full backend suite in the container: 423 passed (8 new agent3-job tests: draft-only, PM approval dating, supersede, gates, 403)
+- [x] deterministic scheduling evals: 4 passed (`evals/tests/test_scheduling_pipeline.py` on Golden Project B, no LLM)
+- [x] migration `c2a9e1f47b35` applied (`alembic current` = c2a9e1f47b35, head); chained on `9d5c1e8a2b74` (single head preserved)
+- [x] job handler `agent3.schedule` registered; every LLM call goes through `run_structured` (`BudgetedLLM` adapter) — audit `agent3.scheduling_completed`, agent_runs + Langfuse wired
+- [x] schedule_drafts persistence: agents write ONLY drafts; `tasks.start/end` are written exclusively by PM approval, and only on PM-approved tasks
+- [x] PM-only API: `GET /projects/{id}/scheduling` + `POST .../scheduling/{draft_id}/decision` (comment required on reject, 409 on re-decide/older draft); frontend "Schedule" tab
+- [x] fixed cross-project dependency leak in `_task_inputs` (dependencies filtered to this project's task ids)
+- [x] live e2e on the dev stack: agent3 job done (explanation source = llm, run_ids recorded), draft #2 created (16 tasks, critical path 1→2→5→7→16, end 2026-11-24), 0 dates before approval, 16/16 dated after, re-decide 409, leader 403
 
 ## Evidence log (fill in with real output)
 - [ ] clean clone -> make up -> /health ok -> alembic current = 5b7e1c9a2d84 (head)

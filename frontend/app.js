@@ -6,7 +6,7 @@ const MAX_UPLOAD = 5 * 1024 * 1024;
 const STATUS = { setup: "Setup", planning: "Planning", scope_review: "Scope review", plan_review: "Plan review", active: "Active", closed: "Closed" };
 const KIND = { brief: "Brief", transcript: "Transcript", note: "Note", file: "File" };
 
-const state = { me: null, projects: [], project: null, team: [], leaders: [], page: "portfolio", tab: "overview", modal: null, notice: null, navOpen: false, reqs: [], scope: null, reqFilter: "all", job: null, stories: [], tasks: [], coverage: null, planFilter: "all", planJob: null };
+const state = { me: null, projects: [], project: null, team: [], leaders: [], page: "portfolio", tab: "overview", modal: null, notice: null, navOpen: false, reqs: [], scope: null, reqFilter: "all", job: null, stories: [], tasks: [], coverage: null, planFilter: "all", planJob: null, schedule: null, scheduleJob: null };
 const app = document.getElementById("app");
 const isPM = () => state.me && state.me.role === "PM";
 
@@ -81,9 +81,9 @@ function portfolioView() {
 function projectView() {
   const p = state.project;
   const tabs = [["overview", "Overview"], ["sources", "Sources (" + p.sources.length + ")"], ["team", "Team (" + state.team.length + ")"]];
-  if (isPM()) tabs.push(["scope", "Scope review"], ["plan", "Work plan"]);
+  if (isPM()) tabs.push(["scope", "Scope review"], ["plan", "Work plan"], ["schedule", "Schedule"]);
   const later = ["Updates (M7)", "Decisions (M8)"];
-  return `<div class="workspace-head"><div class="workspace-title"><div class="project-monogram">${esc((p.name || "P")[0].toUpperCase())}</div><div><h1>${esc(p.name)}</h1><p>${esc(p.goal || "No goal added")}</p></div></div><div style="display:flex;gap:8px;align-items:center">${statusBadge(p.status)}${isPM() ? '<button class="btn btn-secondary btn-small" data-action="modal" data-modal="edit-project">Edit project</button>' : ""}</div></div><div class="tabs">${tabs.map(t => `<button class="${state.tab === t[0] ? "active" : ""}" data-action="tab" data-tab="${t[0]}">${esc(t[1])}</button>`).join("")}${later.map(l => `<button disabled style="opacity:.45;cursor:not-allowed" title="Not available yet">${esc(l)}</button>`).join("")}</div>${state.tab === "sources" ? sourcesView() : state.tab === "team" ? teamView() : state.tab === "scope" ? scopeView() : state.tab === "plan" ? planView() : overviewView()}`;
+  return `<div class="workspace-head"><div class="workspace-title"><div class="project-monogram">${esc((p.name || "P")[0].toUpperCase())}</div><div><h1>${esc(p.name)}</h1><p>${esc(p.goal || "No goal added")}</p></div></div><div style="display:flex;gap:8px;align-items:center">${statusBadge(p.status)}${isPM() ? '<button class="btn btn-secondary btn-small" data-action="modal" data-modal="edit-project">Edit project</button>' : ""}</div></div><div class="tabs">${tabs.map(t => `<button class="${state.tab === t[0] ? "active" : ""}" data-action="tab" data-tab="${t[0]}">${esc(t[1])}</button>`).join("")}${later.map(l => `<button disabled style="opacity:.45;cursor:not-allowed" title="Not available yet">${esc(l)}</button>`).join("")}</div>${state.tab === "sources" ? sourcesView() : state.tab === "team" ? teamView() : state.tab === "scope" ? scopeView() : state.tab === "plan" ? planView() : state.tab === "schedule" ? scheduleView() : overviewView()}`;
 }
 
 function overviewView() {
@@ -142,7 +142,7 @@ function modalView() {
 function render() {
   const notice = state.notice; state.notice = null;
   const body = state.page === "project" && state.project ? projectView() : portfolioView();
-  app.innerHTML = `<div class="app-shell">${sidebar()}<div class="main-area">${topbar()}<main class="content">${notice ? noticeHtml(notice) : ""}${body}</main></div></div>${state.modal ? (state.modal.type === "decide-req" ? scopeModal() : state.modal.type === "decide-story" || state.modal.type === "decide-task" ? planModal() : modalView()) : ""}`;
+  app.innerHTML = `<div class="app-shell">${sidebar()}<div class="main-area">${topbar()}<main class="content">${notice ? noticeHtml(notice) : ""}${body}</main></div></div>${state.modal ? (state.modal.type === "decide-req" ? scopeModal() : state.modal.type === "decide-story" || state.modal.type === "decide-task" ? planModal() : state.modal.type === "decide-schedule" ? scheduleModal() : modalView()) : ""}`;
 }
 
 function showModalError(msg) {
@@ -355,6 +355,14 @@ Object.assign(actions, {
         if (active) { state.planJob = active; pollPlanJob(active.id); }
       } catch (e) { if (e.message === "unauthorized") throw e; }
     }
+    if (t.dataset.tab === "schedule") {
+      await reloadSchedule();
+      try {
+        const jobs = await api(`/projects/${state.project.id}/jobs`);
+        const active = jobs.find(j => j.type === "agent3.schedule" && ["queued", "running"].includes(j.status));
+        if (active) { state.scheduleJob = active; pollScheduleJob(active.id); }
+      } catch (e) { if (e.message === "unauthorized") throw e; }
+    }
     baseTab(t);
   },
   "scope-filter": t => { state.reqFilter = t.dataset.f; render(); },
@@ -537,5 +545,141 @@ Object.assign(submitters, {
     await post(`/projects/${state.project.id}/tasks/${m.item.id}/decision`, body);
     state.modal = null; await reloadPlan();
     state.notice = { type: "ok", text: m.mode === "rejected" ? "Task rejected." : "Task edited and approved." }; render();
+  },
+});
+
+/* ===== Schedule / Agent 3 (M6.1) ===== */
+let scheduleTimer = null;
+
+async function reloadSchedule() {
+  const id = state.project.id;
+  const [draft, tasks] = await Promise.all([
+    api(`/projects/${id}/scheduling`).catch(e => { if (e.message === "unauthorized") throw e; return null; }),
+    api(`/projects/${id}/tasks`),
+  ]);
+  state.schedule = draft; state.tasks = tasks;
+}
+
+function pollScheduleJob(id) {
+  clearInterval(scheduleTimer);
+  const tick = async () => {
+    try {
+      const j = await api(`/jobs/${id}`);
+      state.scheduleJob = j;
+      const finished = ["done", "failed", "cancelled", "waiting_for_pm"].includes(j.status);
+      if (finished) clearInterval(scheduleTimer);
+      if (state.page === "project" && state.tab === "schedule") {
+        if (finished) await reloadSchedule();
+        if (!state.modal) render();
+      }
+    } catch (e) { clearInterval(scheduleTimer); }
+  };
+  tick(); scheduleTimer = setInterval(tick, 3000);
+}
+
+const scheduleBadge = s => s === "approved" ? '<span class="badge green">Approved</span>' : s === "rejected" ? '<span class="badge" style="background:#fde8e8;color:#b00020">Rejected</span>' : s === "superseded" ? '<span class="badge">Superseded</span>' : '<span class="badge blue">Draft</span>';
+const estimateBadge = s => s === "llm" ? '<span class="badge blue">LLM</span>' : s === "pm" ? '<span class="badge green">PM</span>' : '<span class="badge">Hours→days</span>';
+const memberName = id => { const m = state.team.find(x => String(x.id) === String(id)); return m ? m.name : null; };
+
+function scheduleTaskRow(t, titles) {
+  const assignee = t.assignee_id ? memberName(t.assignee_id) : null;
+  const critical = t.is_critical ? '<span class="badge" style="background:#fff4e5;color:#9a5b00">Critical</span>' : "";
+  const float = t.total_float > 0 ? `<span class="subtle">Float: ${esc(t.total_float)} working day${t.total_float === 1 ? "" : "s"}</span>` : '<span class="subtle">Float: 0 (critical)</span>';
+  return `<div class="project-row"><div style="flex:1;min-width:0"><div class="project-title">${esc(titles[t.id] || t.title || "Task #" + t.id)} ${critical}</div><div class="row-meta"><span class="badge">${esc(fmtDate(t.start_date))} → ${esc(fmtDate(t.end_date))}</span><span class="badge">${esc(t.duration_days)} working day${t.duration_days === 1 ? "" : "s"}</span><span class="badge">${esc(assignee || "Unassigned")}</span>${float}</div></div></div>`;
+}
+
+function conflictRow(c, titles) {
+  const tasks = c.task_ids.map(id => titles[id] || "Task #" + id).join(", ");
+  const ratio = c.overload_ratio != null ? ` · peak ${(Number(c.overload_ratio) * 100).toFixed(0)}% of capacity` : "";
+  return `<div class="project-row"><div><div class="project-title"><span class="badge" style="background:#fde8e8;color:#b00020">${esc(c.kind === "overallocation" ? "Overallocation" : "Outside availability")}</span> ${esc(memberName(c.assignee_id) || c.assignee_id)}</div><div class="row-meta"><span class="subtle">${esc(tasks)}</span><span class="subtle">${esc(fmtDate(c.start_date))} → ${esc(fmtDate(c.end_date))}</span><span class="subtle">${esc(c.working_days)} working day${c.working_days === 1 ? "" : "s"}${ratio}</span></div></div></div>`;
+}
+
+function scheduleView() {
+  const d = state.schedule;
+  const job = state.scheduleJob;
+  const running = job && ["queued", "running"].includes(job.status);
+  const schedulable = ["planning", "plan_review", "active"].includes(state.project.status) && state.tasks.some(t => t.review_status === "approved");
+  const jobLine = job ? `<div class="callout${job.status === "failed" ? " warning" : ""}">Scheduling job #${esc(job.id)}: <b>${esc(job.status)}</b> (${esc(job.progress)}%)${job.error ? "<br>" + esc(job.error) : ""}</div>` : "";
+  const hint = !schedulable ? `<p class="subtle">Agent 3 needs the work plan approved: review the plan tasks first (project status: ${esc(state.project.status)}).</p>` : "";
+
+  const head = `<div class="page-head"><div><div class="eyebrow">Agent 3</div><h1>Schedule</h1><p>Deterministic dates, critical path, resource conflicts and capacity. Task dates are written only when you approve the draft.</p></div><div><button class="btn btn-primary" data-action="run-schedule"${running || !schedulable ? " disabled" : ""}>${running ? "Scheduling..." : "Run Agent 3"}</button>${hint}</div></div>`;
+  if (!d) return `${head}${jobLine}<section class="card"><div class="card-body"><div class="empty"><div class="empty-icon">◷</div><h3>No schedule yet</h3><p>Approve the work plan tasks, then run Agent 3 to compute the project schedule.</p></div></div></section>`;
+
+  const p = d.payload || {};
+  const schedule = p.schedule || { tasks: [], critical_path: [], project_start: d.project_start, project_end: d.project_end, total_duration_days: d.total_duration_days };
+  const titles = {};
+  schedule.tasks.forEach(t => { titles[t.id] = t.title || state.tasks.find(x => String(x.id) === String(t.id))?.title || "Task #" + t.id; });
+  const conflicts = p.conflicts || [];
+  const capacity = p.capacity || { members: [], total_available_hours: 0, total_assigned_hours: 0 };
+  const explanation = p.explanation || {};
+  const decisions = d.review_status === "draft"
+    ? `<div class="item-actions" style="margin-top:12px"><button class="btn btn-primary" data-action="schedule-approve">Approve & write dates</button><button class="btn btn-secondary" data-action="schedule-reject">Reject</button></div><p class="subtle" style="margin-top:6px">Approving writes start/end dates on every task (PM-locked tasks are skipped). Rejecting keeps the plan undated.</p>`
+    : d.review_status === "rejected"
+      ? `<div class="callout warning" style="margin-top:12px">Rejected${d.pm_comment ? ": " + esc(d.pm_comment) : ""}. Re-run Agent 3 after fixing the plan.</div>`
+      : `<div class="callout" style="margin-top:12px">Approved${d.pm_comment ? ": " + esc(d.pm_comment) : ""}. Task dates are live in the plan.</div>`;
+
+  const chain = (schedule.critical_path || []).map(id => esc(titles[id] || id)).join(' <span class="subtle">→</span> ');
+  const taskRows = schedule.tasks.map(t => scheduleTaskRow(t, titles)).join("");
+  const conflictRows = conflicts.map(c => conflictRow(c, titles)).join("");
+  const capacityRows = (capacity.members || []).map(m => {
+    const util = m.utilization == null ? "—" : Math.round(Number(m.utilization) * 100) + "%";
+    const avail = m.available_days ? `${esc(m.available_days)} days · ${esc(Math.round(Number(m.available_hours)))} h available` : "No availability in this window";
+    return `<div class="project-row"><div><div class="project-title">${esc(m.name || m.member_id)} ${m.is_overloaded ? '<span class="badge" style="background:#fde8e8;color:#b00020">Overloaded</span>' : ""}</div><div class="row-meta"><span class="badge">${esc(m.hours_per_day)} h/day</span><span class="badge">Utilization ${esc(util)}</span><span class="subtle">${avail}</span><span class="subtle">${esc(Math.round(Number(m.assigned_hours)))} h assigned</span></div></div></div>`;
+  }).join("");
+  const estimateRows = (p.estimates || []).map(e => {
+    const hours = state.tasks.find(x => String(x.id) === String(e.task_id));
+    return `<div class="project-row"><div><div class="project-title">${esc(titles[e.task_id] || "Task #" + e.task_id)} ${estimateBadge(e.source)}</div><div class="row-meta"><span class="badge">${esc(e.duration_days)} working day${e.duration_days === 1 ? "" : "s"}</span>${hours ? `<span class="subtle">${esc(hours.estimate_hours)} h estimate</span>` : ""}${e.rationale ? `<span class="subtle">Why: ${esc(e.rationale)}</span>` : ""}</div></div></div>`;
+  }).join("");
+  const explainLines = [explanation.summary, explanation.critical_path].filter(Boolean).map(x => `<p style="margin:6px 0">${esc(x)}</p>`).join("");
+  const explainList = (explanation.conflicts || []).concat(explanation.estimates || []).map(x => `<li>${esc(x)}</li>`).join("");
+  const explainSource = explanation.source === "template" ? '<span class="badge">Template wording</span>' : explanation.source === "llm" ? '<span class="badge blue">LLM wording</span>' : "";
+
+  return `${head}${jobLine}
+<div class="grid two-col">
+  <section class="card section-card"><h2>Summary ${scheduleBadge(d.review_status)}</h2><p class="section-intro">Computed by code (CPM over working days, Fri+Sat weekend). The LLM never produces dates.</p>
+    <div class="keyvals">${kv("Project start", fmtDate(schedule.project_start))}${kv("Project end", fmtDate(schedule.project_end))}${kv("Total duration", schedule.total_duration_days + " working days")}${kv("Tasks scheduled", String(schedule.tasks.length))}${kv("Conflicts", String(conflicts.length))}</div>
+    ${decisions}
+  </section>
+  <section class="card section-card"><h2>Why this schedule ${explainSource}</h2><p class="section-intro">${explanation.source === "template" ? "Deterministic template (the LLM was unavailable)." : "Written by the LLM from numbers the code computed — it cannot change them."}</p>
+    ${explainLines || '<p class="subtle">No explanation stored.</p>'}${explainList ? `<ul style="margin:8px 0 0 18px;font-size:13px">${explainList}</ul>` : ""}
+    <p class="subtle" style="margin-top:10px">Draft #${esc(d.id)} · created ${esc(fmtDateTime(d.created_at))}${d.reviewed_at ? " · decided " + esc(fmtDateTime(d.reviewed_at)) : ""}</p>
+  </section>
+</div>
+<section class="card section-card"><h2>Critical path</h2><p class="section-intro">One representative chain with zero float. Any delay here moves the project end.</p>
+  ${chain ? `<p style="margin:4px 0">${chain}</p>` : '<p class="subtle">No critical chain stored.</p>'}
+</section>
+<section class="card section-card"><h2>Tasks (${schedule.tasks.length})</h2><div class="card-body"><div class="project-list">${taskRows}</div></div></section>
+<section class="card section-card"><h2>Resource conflicts</h2>${conflicts.length ? `<div class="card-body"><div class="project-list">${conflictRows}</div></div>` : '<div class="card-body"><div class="callout">No resource conflicts: nobody is overallocated and every task fits its assignee availability.</div></div>'}</section>
+<section class="card section-card"><h2>Team capacity</h2><div class="card-body"><div class="project-list">${capacityRows || '<div class="empty"><div class="empty-icon">☺</div><h3>No members</h3><p>Add team members to see capacity.</p></div>'}</div></div></section>
+<section class="card section-card"><h2>How durations were estimated</h2><p class="section-intro">PM duration &gt; hours→days conversion &gt; LLM initial estimate (validated by code).</p><div class="card-body"><div class="project-list">${estimateRows}</div></div></section>`;
+}
+
+function scheduleModal() {
+  return modalShell("Reject schedule", "No task dates will be written. Explain what should change before re-running Agent 3.", "decide-schedule",
+    field("Reason *", '<textarea name="comment" required></textarea>', true), "Reject");
+}
+
+Object.assign(actions, {
+  "run-schedule": async () => {
+    if (!confirm("Run Agent 3? It computes a draft schedule (dates, critical path, conflicts, capacity). Task dates change only when you approve the draft.")) return;
+    const job = await post(`/projects/${state.project.id}/jobs`, { type: "agent3.schedule" });
+    state.scheduleJob = job; render(); pollScheduleJob(job.id);
+  },
+  "schedule-approve": async () => {
+    const d = state.schedule;
+    if (!confirm("Approve this schedule? Start/end dates are written on every task except PM-locked ones.")) return;
+    await post(`/projects/${state.project.id}/scheduling/${d.id}/decision`, { decision: "approved" });
+    await reloadSchedule(); await reloadPlan();
+    state.notice = { type: "ok", text: "Schedule approved and task dates written." }; render();
+  },
+  "schedule-reject": () => { state.modal = { type: "decide-schedule" }; render(); },
+});
+
+Object.assign(submitters, {
+  "decide-schedule": async form => {
+    const d = new FormData(form);
+    await post(`/projects/${state.project.id}/scheduling/${state.schedule.id}/decision`, { decision: "rejected", comment: String(d.get("comment") || "").trim() });
+    state.modal = null; await reloadSchedule();
+    state.notice = { type: "ok", text: "Schedule rejected. No dates were written." }; render();
   },
 });

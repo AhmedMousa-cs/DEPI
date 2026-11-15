@@ -9,7 +9,7 @@ Conventions
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -161,3 +161,40 @@ class TeamCapacityReport(_Base):
     total_available_hours: float
     total_assigned_hours: float
     unknown_assignees: tuple[str, ...] = ()
+
+
+# ----------------------------------------------------------- PM review API (M6.1)
+class ScheduleDraftOut(BaseModel):
+    """One Agent 3 draft, as stored by the job handler. Payload is the full Agent3Output dump."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int
+    run_ids: list[int] = Field(default_factory=list)
+    payload: dict
+    project_start: date
+    project_end: date
+    total_duration_days: int
+    conflicts_count: int
+    review_status: str
+    pm_comment: str | None
+    created_by_agent: str | None
+    reviewed_by: int | None
+    reviewed_at: datetime | None
+    created_at: datetime
+
+
+class ScheduleDecision(BaseModel):
+    """PM decision on a schedule draft. Approving writes tasks.start/end; agents never do."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    decision: Literal["approved", "rejected"]
+    comment: str = Field(default="", max_length=2000)
+
+    @model_validator(mode="after")
+    def _rules(self):
+        if self.decision == "rejected" and not self.comment:
+            raise ValueError("a comment is required when rejecting")
+        return self

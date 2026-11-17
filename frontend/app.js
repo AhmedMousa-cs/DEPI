@@ -6,7 +6,7 @@ const MAX_UPLOAD = 5 * 1024 * 1024;
 const STATUS = { setup: "Setup", planning: "Planning", scope_review: "Scope review", plan_review: "Plan review", active: "Active", closed: "Closed" };
 const KIND = { brief: "Brief", transcript: "Transcript", note: "Note", file: "File" };
 
-const state = { me: null, projects: [], project: null, team: [], leaders: [], page: "portfolio", tab: "overview", modal: null, notice: null, navOpen: false, reqs: [], scope: null, gaps: null, reqFilter: "all", job: null, stories: [], tasks: [], coverage: null, planFilter: "all", planJob: null, schedule: null, scheduleJob: null, chain: null };
+const state = { me: null, projects: [], project: null, team: [], leaders: [], page: "portfolio", tab: "overview", modal: null, notice: null, navOpen: false, reqs: [], scope: null, gaps: null, reqFilter: "all", job: null, stories: [], tasks: [], coverage: null, planFilter: "all", planJob: null, schedule: null, scheduleJob: null, chain: null, pf: null };
 const app = document.getElementById("app");
 const isPM = () => state.me && state.me.role === "PM";
 
@@ -72,10 +72,77 @@ function topbar() {
 
 function noticeHtml(n) { return `<div class="callout ${n.type === "ok" ? "" : "warning"}" style="white-space:pre-wrap">${esc(n.text)}</div>`; }
 
-function portfolioView() {
-  const rows = state.projects.map(p => `<div class="project-row"><div><div class="project-title">${esc(p.name)}</div><div class="project-sub">${esc(p.goal || "No goal added")}</div><div class="row-meta">${statusBadge(p.status)}<span class="subtle">${fmtDate(p.start_date)} → ${fmtDate(p.end_date)}</span></div></div><button class="btn btn-secondary btn-small" data-action="open-project" data-id="${p.id}">Open workspace →</button></div>`).join("");
+/* ---------- M7 PM command center ---------- */
+function pfState() {
+  if (!state.pf) state.pf = { tab: "projects", overview: null, resources: null, risks: null, chat: [], busy: false };
+  return state.pf;
+}
+
+async function loadPf() {
+  const pf = pfState();
+  if (state.page !== "portfolio") return;
+  try {
+    if (pf.tab === "resources" && !pf.resources) pf.resources = await api("/portfolio/resources");
+    else if (pf.tab === "risks" && !pf.risks) pf.risks = await api("/portfolio/risks");
+    else if (!pf.overview) pf.overview = await api("/portfolio/overview");
+  } catch (e) { if (e.message !== "unauthorized") { state.notice = { type: "error", text: e.message }; } }
+  render();
+}
+
+function pfHealthDot(h) { return h === "green" ? "🟢" : h === "yellow" ? "🟡" : "🔴"; }
+function pfChip(value, label, cls) { return `<div class="pf-chip ${cls || ""}"><b>${esc(value)}</b><small>${esc(label)}</small></div>`; }
+function pfLoading(label) { return `<div class="empty"><div class="empty-icon">…</div><h3>${esc(label)}</h3></div>`; }
+
+function pfTabs() {
+  const pf = pfState();
+  const tabs = [["projects", "Projects"], ["resources", "Resources"], ["risks", "Risks"]];
+  if (isPM()) tabs.push(["assistant", "✦ Assistant"]);
+  return tabs.map(t => `<button class="${pf.tab === t[0] ? "active" : ""}" data-action="pf-tab" data-tab="${t[0]}">${esc(t[1])}</button>`).join("");
+}
+
+function pfProjects() {
+  const pf = pfState();
+  if (!pf.overview) return pfLoading("Loading the portfolio…");
+  const s = pf.overview.summary;
+  const cards = pf.overview.projects.map(c => `<div class="project-row"><div style="flex:1"><div class="project-title">${pfHealthDot(c.health)} ${esc(c.name)} <span class="badge ${c.health === "green" ? "green" : c.health === "red" ? "red" : "blue"}">${esc(c.health.toUpperCase())}</span></div><div class="project-sub">${esc(STATUS[c.status] || c.status)} · next deadline: ${c.next_deadline ? fmtDate(c.next_deadline) : "not set"}${c.overdue_tasks ? ` · <b style="color:var(--red)">${c.overdue_tasks} overdue</b>` : ""}</div><div class="row-meta"><span class="subtle">${c.tasks.approved} tasks approved · ${c.tasks.done} done · ${c.requirements.draft} draft req(s)</span></div><div class="progress"><span style="width:${c.progress_pct}%"></span></div><div class="row-meta"><span class="subtle">${esc(c.health_reasons.join(" · "))}</span></div></div><button class="btn btn-secondary btn-small" data-action="open-project" data-id="${c.project_id}">Open workspace →</button></div>`).join("");
   const empty = `<div class="empty"><div class="empty-icon">◈</div><h3>${isPM() ? "No projects yet" : "No projects assigned to you"}</h3><p>${isPM() ? "Create the first project with a brief and an optional kickoff transcript." : "A Project Manager must link you as a Team Leader on a project."}</p>${isPM() ? '<button class="btn btn-primary" data-action="modal" data-modal="create-project">Create first project</button>' : ""}</div>`;
-  return `<div class="page-head"><div><div class="eyebrow">Portfolio</div><h1>${isPM() ? "All projects" : "My projects"}</h1><p>Everything shown here is loaded from the database.</p></div>${isPM() ? '<button class="btn btn-primary" data-action="modal" data-modal="create-project">＋ Create project</button>' : ""}</div><section class="card"><div class="card-body">${state.projects.length ? `<div class="project-list">${rows}</div>` : empty}</div></section>`;
+  return `<div class="pf-chips">${pfChip(s.total, "Total projects", "")}${pfChip(s.green, "On track", "ok")}${pfChip(s.yellow, "Needs attention", "warn")}${pfChip(s.red, "Critical", "bad")}</div><section class="card"><div class="card-body">${pf.overview.projects.length ? `<div class="project-list">${cards}</div>` : empty}</div></section>`;
+}
+
+function pfResources() {
+  const pf = pfState();
+  if (!pf.resources) return pfLoading("Loading resources…");
+  const s = pf.resources.summary;
+  const rows = pf.resources.members.map(r => `<div class="project-row"><div style="flex:1"><div class="project-title">${esc(r.name)} ${r.overallocated ? '<span class="badge red">Over-allocated</span>' : ""}</div><div class="project-sub">${esc(r.role || "No role title")} · ${esc(r.project_name)} · ${r.assigned_tasks} task(s) · ${r.hours_per_week} h/week of ${r.capacity_hours_per_week} h capacity</div><div class="progress"><span style="width:${Math.min(r.utilization_pct, 100)}%;${r.overallocated ? "background:var(--red)" : ""}"></span></div><div class="row-meta"><span class="subtle">${r.utilization_pct}% utilization · window ${r.window_start ? fmtDate(r.window_start) : "—"} → ${r.window_end ? fmtDate(r.window_end) : "—"}</span></div></div><button class="btn btn-secondary btn-small" data-action="open-project" data-id="${r.project_id}">Open →</button></div>`).join("");
+  const conflicts = pf.resources.conflicts.length ? `<div class="callout warning">${pf.resources.conflicts.map(c => `<b>${esc(c.person)}</b> is booked in ${c.projects.map(esc).join(" + ")} with overlapping windows.`).join("<br>")}<br><span class="subtle">Rebalance the assignments or shift one project's window.</span></div>` : "";
+  return `<div class="pf-chips">${pfChip(s.members, "People on projects", "")}${pfChip(s.overallocated, "Over-allocated", s.overallocated ? "bad" : "ok")}${pfChip(s.utilization_pct + "%", "Overall utilization", "")}${pfChip(s.total_capacity_hours_per_week + "h", "Capacity / week", "")}</div>${conflicts}<section class="card"><div class="card-body">${s.members ? `<div class="project-list">${rows}</div>` : `<div class="empty"><div class="empty-icon">☺</div><h3>No team members yet</h3><p>Import a team inside a project to see capacity here.</p></div>`}</div></section>`;
+}
+
+function pfRisks() {
+  const pf = pfState();
+  if (!pf.risks) return pfLoading("Loading the risk register…");
+  const s = pf.risks.summary;
+  const groups = [["high", "High severity", "red"], ["medium", "Medium severity", "blue"], ["low", "Low severity", "green"]];
+  const sections = groups.map(g => {
+    const rows = pf.risks.risks.filter(r => r.severity === g[0]);
+    if (!rows.length) return "";
+    return `<h2 style="margin:6px 0 10px">${esc(g[1])} (${rows.length})</h2><div class="project-list">${rows.map(r => `<div class="project-row"><div style="flex:1"><div class="project-title"><span class="badge ${g[2]}">${esc(r.type)}</span> ${esc(r.project_name)}</div><div class="project-sub">${esc(r.message)}</div><div class="row-meta"><span class="subtle">→ ${esc(r.suggestion)}</span></div></div>${r.project_id ? `<button class="btn btn-secondary btn-small" data-action="open-project" data-id="${r.project_id}">Open →</button>` : ""}</div>`).join("")}</div>`;
+  }).join("");
+  return `<div class="pf-chips">${pfChip(s.total, "Open risks", s.total ? "warn" : "ok")}${pfChip(s.high, "High", s.high ? "bad" : "ok")}${pfChip(s.medium, "Medium", "")}</div>${sections || pfLoading("No risks detected — everything is on track.")}`;
+}
+
+function pfAssistant() {
+  if (!isPM()) return `<div class="callout warning">The AI assistant is available to the Project Manager.</div>`;
+  const pf = pfState();
+  const bubbles = pf.chat.map((m, i) => `<div class="pf-msg ${m.role}"><div class="pf-bubble">${esc(m.content)}</div>${m.suggestions && m.suggestions.length ? `<div class="pf-suggest">${m.suggestions.map((sp, j) => `<button class="btn btn-secondary btn-small" data-action="pf-suggest" data-msg="${i}" data-i="${j}">${esc(sp.title)}</button>`).join("")}</div>` : ""}</div>`).join("");
+  const hello = pf.chat.length ? "" : `<div class="pf-msg assistant"><div class="pf-bubble">Ask me anything about your portfolio — health, resources, risks — and I will suggest the next action. My answers come from the live portfolio snapshot.</div></div>`;
+  return `${hello}${bubbles}${pf.busy ? '<div class="pf-msg assistant"><div class="pf-bubble">Thinking…</div></div>' : ""}<div class="pf-input-row"><input id="pf-input" placeholder="Ask about your projects, resources or risks…" ${pf.busy ? "disabled" : ""} onkeydown="if(event.key==='Enter'){event.preventDefault();this.closest('.content').querySelector('[data-action=pf-send]').click();}"><button class="btn btn-primary" data-action="pf-send" ${pf.busy ? "disabled" : ""}>Send</button></div>`;
+}
+
+function portfolioView() {
+  const pf = pfState();
+  const body = pf.tab === "resources" ? pfResources() : pf.tab === "risks" ? pfRisks() : pf.tab === "assistant" ? pfAssistant() : pfProjects();
+  return `<div class="page-head"><div><div class="eyebrow">M7 · Command center</div><h1>${isPM() ? "Portfolio" : "My projects"}</h1><p>${isPM() ? "Projects, resources and risks in one screen — plus an assistant that reads the live snapshot." : "Everything shown here is loaded from the database."}</p></div>${isPM() ? '<button class="btn btn-primary" data-action="modal" data-modal="create-project">＋ Create project</button>' : ""}</div><div class="tabs">${pfTabs()}</div>${body}`;
 }
 
 function projectView() {
@@ -156,7 +223,39 @@ function closeModal() { state.modal = null; render(); }
 const actions = {
   "toggle-nav": () => { state.navOpen = !state.navOpen; render(); },
   "logout": () => logout(),
-  "go-portfolio": async () => { await reloadProjects(); state.page = "portfolio"; state.project = null; state.navOpen = false; render(); },
+  "go-portfolio": async () => { await reloadProjects(); state.page = "portfolio"; state.project = null; state.navOpen = false; if (state.pf) { state.pf.overview = state.pf.resources = state.pf.risks = null; } render(); loadPf(); },
+  "pf-tab": t => { const pf = pfState(); pf.tab = t.dataset.tab; render(); loadPf(); },
+  "pf-send": async () => {
+    const pf = pfState();
+    const input = document.getElementById("pf-input");
+    const text = (input && input.value || "").trim();
+    if (!text || pf.busy) return;
+    pf.chat.push({ role: "user", content: text });
+    pf.busy = true; render();
+    try {
+      const history = pf.chat.map(m => ({ role: m.role, content: m.content })).slice(-12);
+      const res = await post("/portfolio/chat", { messages: history });
+      pf.chat.push({ role: "assistant", content: res.reply, suggestions: res.suggestions || [] });
+    } catch (e) {
+      if (e.message === "unauthorized") throw e;
+      pf.chat.push({ role: "assistant", content: "I could not answer just now: " + e.message, suggestions: [] });
+    }
+    pf.busy = false; render();
+    const el = document.getElementById("pf-input"); if (el) el.focus();
+  },
+  "pf-suggest": async t => {
+    const pf = pfState();
+    const m = pf.chat[Number(t.dataset.msg)];
+    const s = m && m.suggestions && m.suggestions[Number(t.dataset.i)];
+    if (!s) return;
+    if (s.action === "view_risks") { pf.tab = "risks"; render(); loadPf(); return; }
+    if (s.action === "view_resources") { pf.tab = "resources"; render(); loadPf(); return; }
+    if (s.project_id != null) {
+      await openProject(s.project_id);
+      if (s.action === "review_drafts") { state.tab = "scope"; render(); }
+      else if (s.action === "schedule") { state.tab = "schedule"; render(); }
+    }
+  },
   "open-project": t => openProject(Number(t.dataset.id)),
   "tab": t => { state.tab = t.dataset.tab; render(); },
   "modal": t => { state.modal = { type: t.dataset.modal }; render(); },
@@ -253,6 +352,7 @@ app.addEventListener("submit", async ev => {
     state.me = await api("/auth/me");
     await reloadProjects();
     render();
+    loadPf();
   } catch (e) {
     if (e.message !== "unauthorized") app.innerHTML = `<div style="max-width:480px;margin:12vh auto;font-family:system-ui"><h2>Cannot load NEXUS</h2><p>${esc(e.message)}</p><button onclick="location.reload()">Retry</button></div>`;
   }

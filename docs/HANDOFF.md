@@ -6,6 +6,15 @@ M4 (Agent 1) and M5 (Agent 2: stories & tasks) are on branch feature/m5-agent2-s
 M5.1 (Agent 2 professional edition) is on branch feature/agent2-v2-professional (stacked on M5).
 M6.1 (Agent 3 platform integration) is on branch feature/m6-agent3-integration (stacked on M5.1).
 M4.1 (Agent 1 smart review: modules/priorities/questions/bulk/gaps) is on branch feature/agent1-smart-review (stacked on M6.1).
+M7 (PM command center: portfolio/resources/risks + assistant chat) is on branch feature/m7-pm-command-center (stacked on feature/agent1-smart-review).
+
+## M7 evidence (PM command center)
+- [x] full backend suite in the container: **453 passed** (441 + 12 new portfolio tests)
+- [x] `alembic current` = `a7c3e1d9f2b8` (head); `agent_runs.project_id` nullable for portfolio-level runs
+- [x] Deterministic endpoints (no LLM): `/portfolio/overview` (health rules: overdue→red, drafts/plan-end→yellow, hours-weighted progress), `/portfolio/resources` (utilization %, name-matched cross-project conflicts), `/portfolio/risks` (schedule/aging-drafts/scope-gaps/overallocation/conflicts, severity-ordered)
+- [x] `POST /portfolio/chat` PM-only, through `run_structured`: live Groq e2e answered from the snapshot with 3 sanitised suggestions (`open_project` → projects 8/10/11); `agent_runs` row #28 `project_id=NULL, status=completed`, audit `portfolio.assistant_chat` written
+- [x] Chat sanitisation tested: invented project ids dropped, unknown actions dropped, history capped at last 12, 422 without a user message
+- [x] Frontend: Portfolio page = segmented command center (Projects | Resources | Risks | ✦ Assistant) with summary chips, health badges, progress bars, utilization bars, severity-grouped risks and a chat panel with clickable suggestion chips; `node --check` passes
 
 ## M5 evidence (Agent 2 - stories & tasks)
 - [x] full backend suite in the container (Python 3.11): 284 passed

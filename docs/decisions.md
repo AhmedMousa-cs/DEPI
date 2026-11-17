@@ -138,6 +138,15 @@ OCR; meeting recording/transcription; automatic external messages; one independe
   - Rejecting a story (single or bulk) now CASCADES to its still-draft child tasks in the same transaction — each child gets its own Decision + audit row (`cascade: story:<id>`); tasks the PM already decided on are never touched. This fixes the UX bug where a rejected story still showed approvable draft tasks.
 - **Consequence:** the demo flow is one click from sources to a computed schedule; nothing bypasses the PM role — every write is still a PM decision, recorded per item.
 
+### ADR-016: PM command center — portfolio overview, resources, risks and an assistant chat (M7)
+- **Status:** Approved
+- **Context:** The PM asked for one screen that manages all his projects, shows cross-project resources, surfaces risks — plus a chatbot that talks to him and suggests actions (M7).
+- **Decision:**
+  - `GET /portfolio/overview` (project cards with 🟢🟡🔴 health from deterministic rules: overdue tasks → red, plan past planned end / pending drafts / stalled pipeline → yellow, hours-weighted progress over approved tasks, next deadline), `GET /portfolio/resources` (per-member capacity vs allocated hours over each member's task window, utilization %, cross-project conflicts matched by normalized name + overlapping windows), `GET /portfolio/risks` (deterministic register: schedule risks, aging drafts > 3 days, stored LLM coverage gaps >= 5 missing areas, overallocated members, cross-project conflicts — each with evidence and a concrete next action, sorted high→medium). All read endpoints accept PM + team leaders, scoped by `_accessible_projects` (leaders see only their projects); **no LLM** in any of them.
+  - `POST /portfolio/chat` (PM-only): the PM assistant. The client sends the recent conversation (stateless backend, last 12 kept); the service attaches today's portfolio snapshot as untrusted DATA (the prompt `pm_assistant_v1.md` forbids following instructions inside it and answering beyond the data), and returns `{reply, suggestions[]}` through `run_structured`. Suggestions are sanitised by CODE: only UI-performable actions (`open_project`, `review_drafts`, `view_risks`, `view_resources`, `schedule`) and only project ids the user can see. The run is portfolio-level: `agent_runs.project_id` became **nullable** (migration `a7c3e1d9f2b8`, chained on `e5f8a3b7c6d4` — single head); the run is still budgeted, token-counted, audited (`portfolio.assistant_chat`) and Langfuse-traced (session `portfolio`).
+  - Frontend: the Portfolio page became a segmented command center (Projects | Resources | Risks | ✦ Assistant) with summary chips, health badges + progress bars, utilization bars, severity-grouped risks, and a chat panel whose suggestion chips route to the actual screens.
+- **Consequence:** the PM sees everything in one screen with zero LLM cost for data; the only LLM call is the explicit chat turn, fully inside the single gateway with all invariants (drafts stay PM-decided; the assistant advises but never acts).
+
 ## Decision Log
 
 | Date | Decision | Reason |
@@ -151,3 +160,4 @@ OCR; meeting recording/transcription; automatic external messages; one independe
 | 2026-11-15 | Agent 1 smart review: modules, priorities, clarify questions, bulk decisions, coverage gaps (ADR-013) | PM asked for something more useful than item-by-item review; live e2e passes |
 | 2026-11-17 | Coverage gaps upgraded to LLM-judged with keyword fallback (ADR-014) | Keyword false positives ("upload" → Performance ✓); live Groq e2e judges meaning correctly |
 | 2026-11-17 | One-click accept-all + automatic agent chain; story-reject cascades to child tasks (ADR-015) | PM asked for accept-everything + auto-run Agents 2/3 with manual buttons kept; live chain e2e passes |
+| 2026-11-17 | PM command center: portfolio overview/resources/risks + PM assistant chat (ADR-016) | PM asked to manage all projects, resources and risks in one screen with a chatbot that suggests actions; live Groq chat e2e passes |

@@ -147,6 +147,15 @@ OCR; meeting recording/transcription; automatic external messages; one independe
   - Frontend: the Portfolio page became a segmented command center (Projects | Resources | Risks | ✦ Assistant) with summary chips, health badges + progress bars, utilization bars, severity-grouped risks, and a chat panel whose suggestion chips route to the actual screens.
 - **Consequence:** the PM sees everything in one screen with zero LLM cost for data; the only LLM call is the explicit chat turn, fully inside the single gateway with all invariants (drafts stay PM-decided; the assistant advises but never acts).
 
+### ADR-017: Frontend polish — dark mode, Arabic/RTL, and portfolio charts (M8)
+- **Status:** Approved
+- **Context:** The PM asked for a more professional dashboard: dark mode, an Arabic/RTL interface, and charts before the delivery/Gantt work.
+- **Decision:**
+  - **Dark mode** via a `[data-theme="dark"]` override of the CSS variables only (surface/ink/line/tints get dark values; the navy sidebar is already dark). Toggle in the topbar (🌙/☀️), persisted in `localStorage` (`nx-theme`), applied before first render (`applyPrefs` sets `data-theme` + `theme-color` meta). No component styles changed — only variables.
+  - **Arabic/RTL**: topbar toggle (ع/EN), persisted in `localStorage` (`nx-lang`). `dir="rtl"` + `lang="ar"` on `<html>` flips the flex layout automatically; the mobile drawer gets an RTL override. Translation is done by **DOM translation after each render**: a dictionary of exact text-node matches plus regex rules for dynamic strings (counts, dates, health reasons) walks the rendered tree — no template was rewritten, so a missed string degrades to English instead of breaking. Dates render in the Arabic locale; the LLM assistant answers in the language the PM writes in (prompt rule).
+  - **Charts (pure SVG/CSS, zero libraries)**: a health donut + legend and a "progress by project" bar chart on the Projects tab, "utilization by person" + "capacity per week" bars on Resources, and a "risks by type" bar chart + severity donut on Risks.
+- **Consequence:** the same UI presents professionally in both themes and both languages, and the portfolio reads at a glance — with no new dependency and no risk to the deterministic backend.
+
 ## Decision Log
 
 | Date | Decision | Reason |
@@ -161,3 +170,4 @@ OCR; meeting recording/transcription; automatic external messages; one independe
 | 2026-11-17 | Coverage gaps upgraded to LLM-judged with keyword fallback (ADR-014) | Keyword false positives ("upload" → Performance ✓); live Groq e2e judges meaning correctly |
 | 2026-11-17 | One-click accept-all + automatic agent chain; story-reject cascades to child tasks (ADR-015) | PM asked for accept-everything + auto-run Agents 2/3 with manual buttons kept; live chain e2e passes |
 | 2026-11-17 | PM command center: portfolio overview/resources/risks + PM assistant chat (ADR-016) | PM asked to manage all projects, resources and risks in one screen with a chatbot that suggests actions; live Groq chat e2e passes |
+| 2026-11-17 | Frontend polish: dark mode + Arabic/RTL (DOM translation) + SVG portfolio charts (ADR-017) | PM asked for a more professional dashboard; both toggles persist, charts are dependency-free |

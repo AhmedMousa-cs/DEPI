@@ -6,18 +6,233 @@ const MAX_UPLOAD = 5 * 1024 * 1024;
 const STATUS = { setup: "Setup", planning: "Planning", scope_review: "Scope review", plan_review: "Plan review", active: "Active", closed: "Closed" };
 const KIND = { brief: "Brief", transcript: "Transcript", note: "Note", file: "File" };
 
-const state = { me: null, projects: [], project: null, team: [], leaders: [], page: "portfolio", tab: "overview", modal: null, notice: null, navOpen: false, reqs: [], scope: null, gaps: null, reqFilter: "all", job: null, stories: [], tasks: [], coverage: null, planFilter: "all", planJob: null, schedule: null, scheduleJob: null, chain: null, pf: null };
+const state = { me: null, projects: [], project: null, team: [], leaders: [], page: "portfolio", tab: "overview", modal: null, notice: null, navOpen: false, reqs: [], scope: null, gaps: null, reqFilter: "all", job: null, stories: [], tasks: [], coverage: null, planFilter: "all", planJob: null, schedule: null, scheduleJob: null, chain: null, pf: null, theme: localStorage.getItem("nx-theme") || "light", lang: localStorage.getItem("nx-lang") || "en" };
 const app = document.getElementById("app");
 const isPM = () => state.me && state.me.role === "PM";
 
 /* ---------- helpers ---------- */
 function esc(v) { return String(v == null ? "" : v).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
-function fmtDate(v) { return v ? new Date(v + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "Not set"; }
+function fmtDate(v) { return v ? new Date(v + "T12:00:00").toLocaleDateString(state.lang === "ar" ? "ar" : undefined, { month: "short", day: "numeric", year: "numeric" }) : t("Not set"); }
 function fmtDateTime(v) { return v ? new Date(v).toLocaleString() : ""; }
 function kv(k, v) { return `<div class="keyval"><small>${esc(k)}</small><b>${esc(v)}</b></div>`; }
 function field(label, inner, full) { return `<div class="field${full ? " full" : ""}"><label>${label}</label>${inner}</div>`; }
 function statusBadge(s) { return `<span class="badge ${s === "active" ? "green" : s === "closed" ? "" : "blue"}">${esc(STATUS[s] || s)}</span>`; }
 
+/* ---------- M8 preferences: theme + language (i18n by DOM translation) ---------- */
+function applyPrefs() {
+  document.documentElement.lang = state.lang === "ar" ? "ar" : "en";
+  document.documentElement.dir = state.lang === "ar" ? "rtl" : "ltr";
+  document.documentElement.dataset.theme = state.theme;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = state.theme === "dark" ? "#0d1420" : "#f4f7fb";
+}
+
+/* Exact-match dictionary: rendered text node content -> Arabic. */
+const AR = {
+  "Project intelligence": "ذكاء المشاريع",
+  "Workspace": "مساحة العمل",
+  "Projects": "المشاريع",
+  "Portfolio": "لوحة القيادة",
+  "New project": "مشروع جديد",
+  "＋ New project": "＋ مشروع جديد",
+  "＋ Create project": "＋ إنشاء مشروع",
+  "↻ Refresh": "↻ تحديث",
+  "Human approval stays in control": "قرار الإنسان يبقى هو المتحكم",
+  "Agents prepare drafts. The PM approves.": "الـ agents يجهزوا المسودات، والمدير يعتمد.",
+  "Sign out": "تسجيل الخروج",
+  "M7 · Command center": "M7 · لوحة القيادة",
+  "My projects": "مشاريعي",
+  "Projects, resources and risks in one screen — plus an assistant that reads the live snapshot.": "المشاريع والموارد والمخاطر في شاشة واحدة — ومساعد ذكي يقرأ اللقطة الحية.",
+  "Everything shown here is loaded from the database.": "كل ما يظهر هنا محمّل من قاعدة البيانات.",
+  "Total projects": "إجمالي المشاريع",
+  "On track": "على المسار",
+  "At risk": "تحتاج انتباه",
+  "Critical": "حرجة",
+  "Needs attention": "تحتاج انتباه",
+  "On track": "على المسار",
+  "Portfolio health": "صحة المحفظة",
+  "Progress by project": "التقدم لكل مشروع",
+  "Open workspace →": "فتح مساحة العمل",
+  "Open →": "فتح",
+  "Loading the portfolio…": "جارٍ تحميل المحفظة…",
+  "No projects yet": "لا توجد مشاريع بعد",
+  "No projects assigned to you": "لا توجد مشاريع مرتبطة بك",
+  "Create the first project with a brief and an optional kickoff transcript.": "أنشئ أول مشروع ببريف ومحضر اجتماع اختياري.",
+  "A Project Manager must link you as a Team Leader on a project.": "يجب أن يربطك مدير المشروع كقائد فريق على مشروع.",
+  "Create first project": "أنشئ أول مشروع",
+  "Resources": "الموارد",
+  "Risks": "المخاطر",
+  "✦ Assistant": "✦ المساعد الذكي",
+  "People on projects": "أفراد على المشاريع",
+  "Over-allocated": "تحميل زائد",
+  "Healthy": "سليم",
+  "Overall utilization": "إجمالي الاستغلال",
+  "Capacity / week": "السعة أسبوعيًا",
+  "Utilization by person": "الاستغلال لكل فرد",
+  "No team members yet": "لا يوجد أفراد بعد",
+  "Import a team inside a project to see capacity here.": "استورد فريقًا داخل مشروع لتشاهد السعة هنا.",
+  "Loading resources…": "جارٍ تحميل الموارد…",
+  "High severity": "خطورة عالية",
+  "Medium severity": "خطورة متوسطة",
+  "Low severity": "خطورة منخفضة",
+  "Open risks": "مخاطر مفتوحة",
+  "Risks by type": "المخاطر حسب النوع",
+  "No risks detected": "لا مخاطر مكتشفة",
+  "Everything is on track — keep it that way.": "كل شيء على المسار — حافظ على كده.",
+  "Loading the risk register…": "جارٍ تحميل سجل المخاطر…",
+  "schedule": "جدولة",
+  "pipeline": "مسار العمل",
+  "scope": "نطاق",
+  "resource": "موارد",
+  "NEXUS Assistant": "مساعد NEXUS",
+  "Answers from the live portfolio snapshot · one LLM turn per message": "إجابات من اللقطة الحية للمحفظة · نداء LLM واحد لكل رسالة",
+  "Ask about your projects, resources or risks…": "اسأل عن مشاريعك أو مواردك أو مخاطرك…",
+  "Send": "إرسال",
+  "I read your live portfolio — projects, resources, risks. Ask me anything, or start with:": "أقرأ محفظتك الحية — مشاريع وموارد ومخاطر. اسألني أي حاجة، أو ابدأ بـ:",
+  "What needs my attention most today?": "إيه أهم حاجة تحتاج انتباهي النهاردة؟",
+  "Who is overloaded right now?": "مين محمّل فوق طاقته دلوقتي؟",
+  "Which risks should I act on first?": "أنهي مخاطر أتعامل معاها الأول؟",
+  "The AI assistant is available to the Project Manager.": "المساعد الذكي متاح لمدير المشروع.",
+  "Overview": "نظرة عامة",
+  "Scope review": "مراجعة النطاق",
+  "Work plan": "خطة العمل",
+  "Schedule": "الجدولة",
+  "Updates (M7)": "التحديثات (M7)",
+  "Decisions (M8)": "القرارات (M8)",
+  "Team": "الفريق",
+  "Sources": "المصادر",
+  "Project snapshot": "ملخص المشروع",
+  "Project brief": "بريف المشروع",
+  "Saved in PostgreSQL; survives a browser refresh.": "محفوظ في PostgreSQL؛ يصمد أمام تحديث المتصفح.",
+  "Status": "الحالة",
+  "Start": "البداية",
+  "Target end": "النهاية المستهدفة",
+  "Team Leader": "قائد الفريق",
+  "Not assigned": "غير معيّن",
+  "Not set": "غير محدد",
+  "No goal added": "لا يوجد هدف",
+  "No brief": "لا يوجد بريف",
+  "Next step: open Scope review to run extraction and approve the requirements — then plan with Agent 2 and schedule with Agent 3. Agents prepare drafts; you approve.": "الخطوة التالية: افتح مراجعة النطاق لتشغيل الاستخراج واعتماد المتطلبات — ثم الخطة مع Agent 2 والجدولة مع Agent 3. الـ agents يجهزوا المسودات، وأنت تعتمد.",
+  "Brief and transcripts. Only extracted text is stored (.txt, .md, .docx, .pdf up to 5 MB).": "بريف ومحاضر. يُحفظ النص المستخرج فقط (.txt, .md, .docx, .pdf حتى 5 ميجابايت).",
+  "Add source": "إضافة مصدر",
+  "View text": "عرض النص",
+  "Members and weekly capacity. A linked Team Leader can see this project.": "الأعضاء والسعة الأسبوعية. قائد الفريق المرتبط يرى هذا المشروع.",
+  "Always available": "متاح دائمًا",
+  "No role title": "بدون مسمى وظيفي",
+  "Edit": "تعديل",
+  "Delete": "حذف",
+  "Edit project": "تعديل المشروع",
+  "Save changes": "حفظ التعديلات",
+  "Cancel": "إلغاء",
+  "Project name *": "اسم المشروع *",
+  "Goal": "الهدف",
+  "Start date": "تاريخ البداية",
+  "Target end date": "تاريخ النهاية المستهدف",
+  "Project brief *": "بريف المشروع *",
+  "Create a project": "إنشاء مشروع",
+  "Start with a brief. A kickoff transcript is optional.": "ابدأ ببريف. محضر الانطلاق اختياري.",
+  "Save": "حفظ",
+  "Add member": "إضافة عضو",
+  "Name *": "الاسم *",
+  "Role title": "المسمى الوظيفي",
+  "Import CSV": "استيراد CSV",
+  "Set Team Leader": "تعيين قائد الفريق",
+  "Remove leader": "إزالة القائد",
+  "Assign": "تعيين",
+  "Import": "استيراد",
+  "Team Leader login": "دخول قائد الفريق",
+  "Team member": "عضو الفريق",
+  "The linked user gets read access to this project.": "المستخدم المرتبط يحصل على صلاحية قراءة لهذا المشروع.",
+  "Add a source": "إضافة مصدر",
+  "Paste text or upload one file.": "الصق نصًا أو ارفع ملفًا واحدًا.",
+  "Type": "النوع",
+  "Title (optional)": "العنوان (اختياري)",
+  "Pasted text": "نص ملصوق",
+  "Transcript": "محضر",
+  "Note": "ملاحظة",
+  "Other file": "ملف آخر",
+  "Brief": "بريف",
+  "File": "ملف",
+  "Confirm": "تأكيد",
+  "OK": "حسنًا",
+};
+
+/* Regex rules for dynamic strings (numbers, dates) the exact map cannot cover. */
+const AR_PATTERNS = [
+  [/^(\d+) task\(s\) past their end date and not done$/, "$1 مهمة تجاوزت نهايتها ولم تكتمل"],
+  [/^(\d+) draft\(s\) waiting for a PM decision$/, "$1 مسودة تنتظر قرار المدير"],
+  [/^the plan ends (\S+) after the planned end (\S+)$/, "الخطة تنتهي $1 بعد النهاية المخططة $2"],
+  [/^requirements are approved but no tasks are approved yet$/, "المتطلبات معتمدة لكن لا مهام معتمدة بعد"],
+  [/^on track$/, "على المسار"],
+  [/drafts have been waiting for a decision since (\S+) \((\d+) days\)$/, "مسودات تنتظر قرارًا منذ $1 ($2 يوم)"],
+  [/^(\d+) standard areas were never mentioned: /, "$1 مناطق معيارية لم تُذكر: "],
+  [/^(\d+) overdue$/, "$1 متأخرة"],
+  [/^(\d+)\/(\d+) tasks done/, "مكتملة $1/$2 مهمة"],
+  [/(\d+) draft req\(s\)/, "$1 متطلب كمسودة"],
+  [/^(\d+) task\(s\)$/, "$1 مهمة"],
+  [/\bnext deadline\b/, "الموعد التالي"],
+  [/^Setup /, "تهيئة "],
+  [/^Planning /, "تخطيط "],
+  [/^Active /, "نشط "],
+  [/\bon track\b/, "على المسار"],
+  [/^window /, "نافذة "],
+  [/^(\d+)% utilization/, "استغلال $1%"],
+  [/^(\d+) h\/week of ([\d.]+) h capacity$/, "$1 ساعة/أسبوع من سعة $2 ساعة"],
+  [/^(\d+) h\/week of ([\d.]+)h$/, "$1 ساعة/أسبوع من $2 س"],
+  [/is at (\d+)% utilization \(([0-9.]+)h\/week of ([0-9.]+)h\)\./, "عند استغلال $1% ($2 ساعة/أسبوع من $3 ساعة)."],
+  [/^(\S.+) is booked in overlapping windows in (\d+) projects\.$/, "$1 محجوز بنوافذ متداخلة في $2 مشاريع."],
+  [/^Analyzed (\d+) requirement\(s\)/, "تم تحليل $1 متطلب"],
+  [/^(\d+) area\(s\) matched by keywords only\./, "$1 مناطق بمطابقة كلمات فقط."],
+  [/^Confidence (\d+)%/, "الثقة $1%"],
+];
+
+function t(s) { return state.lang === "ar" ? (AR[s] || s) : s; }
+
+function translateDom(root) {
+  if (state.lang !== "ar" || !root) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: n => n.nodeValue.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
+  });
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (const n of nodes) {
+    const raw = n.nodeValue, s = raw.trim();
+    if (AR[s] != null) { n.nodeValue = raw.replace(s, AR[s]); continue; }
+    let out = s;
+    for (const [re, to] of AR_PATTERNS) {
+      if (re.test(out)) out = out.replace(re, to);
+    }
+    if (out !== s) n.nodeValue = raw.replace(s, out);
+  }
+  for (const el of root.querySelectorAll("[placeholder],[title],[data-text]")) {
+    for (const a of ["placeholder", "title", "data-text"]) {
+      const v = el.getAttribute(a);
+      if (v && AR[v] != null) el.setAttribute(a, AR[v]);
+    }
+  }
+}
+
+/* ---------- M8 charts (pure SVG/CSS, no libraries) ---------- */
+function pfDonut(parts) {
+  const total = parts.reduce((n, p) => n + p.value, 0);
+  const R = 42, C = 2 * Math.PI * R;
+  let acc = 0;
+  const segs = total ? parts.map(p => {
+    const frac = p.value / total;
+    const seg = `<circle r="${R}" cx="60" cy="60" fill="none" stroke="${p.color}" stroke-width="14" stroke-dasharray="${(frac * C).toFixed(2)} ${(C - frac * C).toFixed(2)}" stroke-dashoffset="${(-acc * C).toFixed(2)}" transform="rotate(-90 60 60)"/>`;
+    acc += frac; return seg;
+  }).join("") : `<circle r="${R}" cx="60" cy="60" fill="none" stroke="var(--line)" stroke-width="14"/>`;
+  return `<svg viewBox="0 0 120 120" class="pf-donut" role="img">${segs}<text x="60" y="68" text-anchor="middle">${total || 0}</text></svg>`;
+}
+
+function pfLegend(parts) {
+  return `<div class="pf-legend">${parts.map(p => `<span><i style="background:${p.color}"></i>${esc(p.label)}<b>${p.value}</b></span>`).join("")}</div>`;
+}
+
+function pfBars(rows) { // [{name, value, max, color, suffix}]
+  const max = Math.max(...rows.map(r => r.max != null ? r.max : r.value), 1);
+  return `<div class="pf-bars">${rows.map(r => `<div class="pf-bar-row"><span class="name" title="${esc(r.name)}">${esc(r.name)}</span><div class="pf-bar-track"><span style="width:${Math.round(100 * Math.min(r.value, max) / max)}%;${r.color ? "background:" + r.color : ""}"></span></div><small>${esc(r.suffix != null ? r.suffix : String(r.value))}</small></div>`).join("")}</div>`;
+}
 function errorMessage(data, status) {
   const d = data && data.detail;
   if (typeof d === "string") return d;
@@ -67,7 +282,7 @@ function sidebar() {
 
 function topbar() {
   const crumb = state.page === "project" && state.project ? state.project.name || "Project" : "Portfolio";
-  return `<header class="topbar"><div style="display:flex;gap:12px;align-items:center"><button class="btn btn-secondary btn-small mobile-menu" data-action="toggle-nav">☰</button><div class="crumb">NEXUS / <b>${esc(crumb)}</b></div></div><div class="top-actions"><span class="badge">${esc(state.me.role)}</span><span class="subtle">${esc(state.me.name)}</span><button class="btn btn-secondary btn-small" data-action="logout">Sign out</button></div></header>`;
+  return `<header class="topbar"><div style="display:flex;gap:12px;align-items:center"><button class="btn btn-secondary btn-small mobile-menu" data-action="toggle-nav">☰</button><div class="crumb">NEXUS / <b>${esc(crumb)}</b></div></div><div class="top-actions"><button class="btn btn-secondary btn-small" data-action="toggle-lang" title="Switch language">${state.lang === "ar" ? "EN" : "ع"}</button><button class="btn btn-secondary btn-small" data-action="toggle-theme" title="Toggle dark mode">${state.theme === "dark" ? "☀️" : "🌙"}</button><span class="badge">${esc(state.me.role)}</span><span class="subtle">${esc(state.me.name)}</span><button class="btn btn-secondary btn-small" data-action="logout">${t("Sign out")}</button></div></header>`;
 }
 
 function noticeHtml(n) { return `<div class="callout ${n.type === "ok" ? "" : "warning"}" style="white-space:pre-wrap">${esc(n.text)}</div>`; }
@@ -101,9 +316,9 @@ const PF_RISK_ICON = { schedule: "⏰", pipeline: "⏸", scope: "🔎", resource
 
 function pfTabs() {
   const pf = pfState();
-  const tabs = [["projects", "Projects"], ["resources", "Resources"], ["risks", "Risks"]];
-  if (isPM()) tabs.push(["assistant", "✦ Assistant"]);
-  return tabs.map(t => `<button class="${pf.tab === t[0] ? "active" : ""}" data-action="pf-tab" data-tab="${t[0]}">${esc(t[1])}</button>`).join("");
+  const tabs = [["projects", t("Projects")], ["resources", t("Resources")], ["risks", t("Risks")]];
+  if (isPM()) tabs.push(["assistant", t("✦ Assistant")]);
+  return tabs.map(t2 => `<button class="${pf.tab === t2[0] ? "active" : ""}" data-action="pf-tab" data-tab="${t2[0]}">${esc(t2[1])}</button>`).join("");
 }
 
 function pfProjects() {
@@ -111,8 +326,9 @@ function pfProjects() {
   if (!pf.overview) return pfLoading("Loading the portfolio…");
   const s = pf.overview.summary;
   const cards = pf.overview.projects.map(c => `<div class="pf-card"><div style="display:flex;gap:12px;align-items:flex-start;flex:1">${pfMonogram(c.name)}<div style="flex:1;min-width:0"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="project-title">${esc(c.name)}</span>${pfHealthPill(c.health)}</div><div class="project-sub">${esc(STATUS[c.status] || c.status)} · next deadline <b>${c.next_deadline ? fmtDate(c.next_deadline) : "not set"}</b>${c.overdue_tasks ? ` · <span style="color:var(--red);font-weight:600">${c.overdue_tasks} overdue</span>` : ""}</div><div class="pf-meter"><div class="pf-meter-track"><span style="width:${c.progress_pct}%"></span></div><small>${c.progress_pct}%</small></div><div class="row-meta"><span class="subtle">${c.tasks.done}/${c.tasks.approved} tasks done · ${c.requirements.draft} draft req(s) · ${esc(c.health_reasons.join(" · "))}</span></div></div></div><button class="btn btn-secondary btn-small" data-action="open-project" data-id="${c.project_id}">Open →</button></div>`).join("");
-  const empty = `<div class="empty"><div class="empty-icon">◈</div><h3>${isPM() ? "No projects yet" : "No projects assigned to you"}</h3><p>${isPM() ? "Create the first project with a brief and an optional kickoff transcript." : "A Project Manager must link you as a Team Leader on a project."}</p>${isPM() ? '<button class="btn btn-primary" data-action="modal" data-modal="create-project">Create first project</button>' : ""}</div>`;
-  return `<div class="pf-chips">${pfChip(s.total, "Total projects", "")}${pfChip(s.green, "On track", "ok")}${pfChip(s.yellow, "Needs attention", "warn")}${pfChip(s.red, "Critical", "bad")}</div><section class="card"><div class="card-body">${pf.overview.projects.length ? `<div class="project-list">${cards}</div>` : empty}</div></section>`;
+  const empty = `<div class="empty"><div class="empty-icon">◈</div><h3>${isPM() ? t("No projects yet") : t("No projects assigned to you")}</h3><p>${isPM() ? t("Create the first project with a brief and an optional kickoff transcript.") : t("A Project Manager must link you as a Team Leader on a project.")}</p>${isPM() ? `<button class="btn btn-primary" data-action="modal" data-modal="create-project">${t("Create first project")}</button>` : ""}</div>`;
+  const charts = pf.overview.projects.length ? `<div class="pf-grid2"><div class="pf-chart-card"><h3>${t("Portfolio health")}</h3><div class="pf-donut-wrap">${pfDonut([{ value: s.green, color: "var(--green)" }, { value: s.yellow, color: "var(--orange)" }, { value: s.red, color: "var(--red)" }])}${pfLegend([{ label: t("On track"), value: s.green, color: "var(--green)" }, { label: t("Needs attention"), value: s.yellow, color: "var(--orange)" }, { label: t("Critical"), value: s.red, color: "var(--red)" }])}</div></div><div class="pf-chart-card"><h3>${t("Progress by project")}</h3>${pfBars(pf.overview.projects.map(c => ({ name: c.name, value: c.progress_pct, max: 100, color: c.health === "red" ? "var(--red)" : c.health === "yellow" ? "var(--orange)" : "var(--accent)", suffix: c.progress_pct + "%" })))}</div></div>` : "";
+  return `<div class="pf-chips">${pfChip(s.total, t("Total projects"), "")}${pfChip(s.green, t("On track"), "ok")}${pfChip(s.yellow, t("Needs attention"), "warn")}${pfChip(s.red, t("Critical"), "bad")}</div>${charts}<section class="card"><div class="card-body">${pf.overview.projects.length ? `<div class="project-list">${cards}</div>` : empty}</div></section>`;
 }
 
 function pfResources() {
@@ -121,7 +337,8 @@ function pfResources() {
   const s = pf.resources.summary;
   const rows = pf.resources.members.map(r => `<div class="pf-card"><div style="display:flex;gap:12px;align-items:flex-start;flex:1">${pfMonogram(r.name)}<div style="flex:1;min-width:0"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="project-title">${esc(r.name)}</span>${r.overallocated ? '<span class="pf-pill bad"><i></i>Over-allocated</span>' : `<span class="pf-pill ok"><i></i>Healthy</span>`}</div><div class="project-sub">${esc(r.role || "No role title")} · ${esc(r.project_name)} · ${r.assigned_tasks} task(s)</div><div class="pf-meter"><div class="pf-meter-track ${r.overallocated ? "bad" : ""}"><span style="width:${Math.min(r.utilization_pct, 100)}%;${r.overallocated ? "background:var(--red)" : r.utilization_pct > 85 ? "background:var(--orange)" : ""}"></span></div><small>${r.utilization_pct}% · ${r.hours_per_week}h/wk of ${r.capacity_hours_per_week}h</small></div><div class="row-meta"><span class="subtle">window ${r.window_start ? fmtDate(r.window_start) : "—"} → ${r.window_end ? fmtDate(r.window_end) : "—"}</span></div></div></div><button class="btn btn-secondary btn-small" data-action="open-project" data-id="${r.project_id}">Open →</button></div>`).join("");
   const conflicts = pf.resources.conflicts.length ? `<div class="pf-alert">${pf.resources.conflicts.map(c => `<div style="display:flex;gap:10px;align-items:flex-start"><span style="font-size:16px">⚠️</span><div><b>${esc(c.person)}</b> is double-booked: ${c.projects.map(esc).join(" + ")} — overlapping windows.<div class="row-meta"><span class="subtle">Rebalance the assignment or shift one project's window.</span></div></div></div>`).join("<hr style='border:none;border-top:1px solid var(--orange-tint);margin:8px 0'>")}</div>` : "";
-  return `<div class="pf-chips">${pfChip(s.members, "People on projects", "")}${pfChip(s.overallocated, "Over-allocated", s.overallocated ? "bad" : "ok")}${pfChip(s.utilization_pct + "%", "Overall utilization", "")}${pfChip(s.total_capacity_hours_per_week + "h", "Capacity / week", "")}</div>${conflicts}<section class="card"><div class="card-body">${s.members ? `<div class="project-list">${rows}</div>` : `<div class="empty"><div class="empty-icon">☺</div><h3>No team members yet</h3><p>Import a team inside a project to see capacity here.</p></div>`}</div></section>`;
+  const chart = s.members ? `<div class="pf-grid2"><div class="pf-chart-card"><h3>${t("Utilization by person")}</h3>${pfBars([...pf.resources.members].sort((a, b) => b.utilization_pct - a.utilization_pct).map(r => ({ name: r.name, value: r.utilization_pct, max: Math.max(100, ...pf.resources.members.map(m => m.utilization_pct)), color: r.overallocated ? "var(--red)" : r.utilization_pct > 85 ? "var(--orange)" : "var(--accent)", suffix: r.utilization_pct + "%" })))}</div><div class="pf-chart-card"><h3>${t("Capacity / week")}</h3>${pfBars(pf.resources.members.slice(0, 8).map(r => ({ name: r.name, value: r.capacity_hours_per_week, max: Math.max(...pf.resources.members.map(m => m.capacity_hours_per_week)), color: "var(--blue)", suffix: r.capacity_hours_per_week + "h" })))}</div></div>` : "";
+  return `<div class="pf-chips">${pfChip(s.members, t("People on projects"), "")}${pfChip(s.overallocated, t("Over-allocated"), s.overallocated ? "bad" : "ok")}${pfChip(s.utilization_pct + "%", t("Overall utilization"), "")}${pfChip(s.total_capacity_hours_per_week + "h", t("Capacity / week"), "")}</div>${chart}${conflicts}<section class="card"><div class="card-body">${s.members ? `<div class="project-list">${rows}</div>` : `<div class="empty"><div class="empty-icon">☺</div><h3>${t("No team members yet")}</h3><p>${t("Import a team inside a project to see capacity here.")}</p></div>`}</div></section>`;
 }
 
 function pfRisks() {
@@ -134,7 +351,8 @@ function pfRisks() {
     if (!rows.length) return "";
     return `<h2 style="margin:6px 0 10px">${esc(label)} <span class="pf-count ${cls}">${rows.length}</span></h2><div class="project-list">${rows.map(r => `<div class="pf-card risk-${cls}"><div style="display:flex;gap:12px;align-items:flex-start;flex:1"><div style="font-size:18px;line-height:1.4">${PF_RISK_ICON[r.type] || "⚠️"}</div><div style="flex:1;min-width:0"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="project-title">${esc(r.project_name)}</span><span class="badge ${cls === "high" ? "red" : cls === "medium" ? "blue" : "green"}">${esc(r.type)}</span></div><div class="project-sub">${esc(r.message)}</div><div class="row-meta"><span class="subtle">→ ${esc(r.suggestion)}</span></div></div></div>${r.project_id ? `<button class="btn btn-secondary btn-small" data-action="open-project" data-id="${r.project_id}">Open →</button>` : ""}</div>`).join("")}</div>`;
   }).join("");
-  return `<div class="pf-chips">${pfChip(s.total, "Open risks", s.total ? "warn" : "ok")}${pfChip(s.high, "High", s.high ? "bad" : "ok")}${pfChip(s.medium, "Medium", "")}</div>${sections || `<div class="empty"><div class="empty-icon">🎉</div><h3>No risks detected</h3><p>Everything is on track — keep it that way.</p></div>`}`;
+  const chart = pf.risks.risks.length ? `<div class="pf-grid2"><div class="pf-chart-card"><h3>${t("Risks by type")}</h3>${pfBars(["schedule", "pipeline", "scope", "resource"].map(ty => ({ name: t(ty), value: pf.risks.risks.filter(r => r.type === ty).length, color: ty === "schedule" ? "var(--red)" : ty === "resource" ? "var(--orange)" : "var(--blue)", suffix: String(pf.risks.risks.filter(r => r.type === ty).length) })).filter(r => r.value > 0))}</div><div class="pf-chart-card"><h3>${t("Open risks")}</h3><div class="pf-donut-wrap">${pfDonut([{ value: s.high, color: "var(--red)" }, { value: s.medium, color: "var(--blue)" }, { value: s.low, color: "var(--green)" }])}${pfLegend([{ label: t("High severity"), value: s.high, color: "var(--red)" }, { label: t("Medium severity"), value: s.medium, color: "var(--blue)" }, { label: t("Low severity"), value: s.low, color: "var(--green)" }])}</div></div></div>` : "";
+  return `<div class="pf-chips">${pfChip(s.total, t("Open risks"), s.total ? "warn" : "ok")}${pfChip(s.high, t("High severity"), s.high ? "bad" : "ok")}${pfChip(s.medium, t("Medium severity"), "")}</div>${chart}${sections || `<div class="empty"><div class="empty-icon">🎉</div><h3>${t("No risks detected")}</h3><p>${t("Everything is on track — keep it that way.")}</p></div>`}`;
 }
 
 function pfAssistant() {
@@ -222,6 +440,7 @@ function render() {
   const notice = state.notice; state.notice = null;
   const body = state.page === "project" && state.project ? projectView() : portfolioView();
   app.innerHTML = `<div class="app-shell">${sidebar()}<div class="main-area">${topbar()}<main class="content">${notice ? noticeHtml(notice) : ""}${body}</main></div></div>${state.modal ? (state.modal.type === "decide-req" || state.modal.type === "decide-req-bulk" ? scopeModal() : state.modal.type === "decide-story" || state.modal.type === "decide-task" ? planModal() : state.modal.type === "decide-schedule" ? scheduleModal() : modalView()) : ""}`;
+  translateDom(app);
 }
 
 function showModalError(msg) {
@@ -234,6 +453,8 @@ function closeModal() { state.modal = null; render(); }
 /* ---------- actions (clicks) ---------- */
 const actions = {
   "toggle-nav": () => { state.navOpen = !state.navOpen; render(); },
+  "toggle-theme": () => { state.theme = state.theme === "dark" ? "light" : "dark"; localStorage.setItem("nx-theme", state.theme); applyPrefs(); render(); },
+  "toggle-lang": () => { state.lang = state.lang === "ar" ? "en" : "ar"; localStorage.setItem("nx-lang", state.lang); applyPrefs(); render(); },
   "logout": () => logout(),
   "go-portfolio": async () => { await reloadProjects(); state.page = "portfolio"; state.project = null; state.navOpen = false; if (state.pf) { state.pf.overview = state.pf.resources = state.pf.risks = null; } render(); loadPf(); },
   "pf-tab": t => { const pf = pfState(); pf.tab = t.dataset.tab; render(); loadPf(); if (pf.tab === "assistant") pfScrollChat(); },
@@ -385,6 +606,7 @@ app.addEventListener("submit", async ev => {
 /* ---------- boot ---------- */
 (async function init() {
   try {
+    applyPrefs();
     state.me = await api("/auth/me");
     await reloadProjects();
     render();

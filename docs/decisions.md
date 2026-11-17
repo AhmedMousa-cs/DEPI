@@ -120,6 +120,15 @@ OCR; meeting recording/transcription; automatic external messages; one independe
   - Coverage gaps: `GET /projects/{id}/requirements/gaps` — deterministic (no LLM) match of ~11 standard product areas (EN + AR keywords) against the live (non-rejected) requirements' text + quote; missing areas are review-meeting questions, not facts. Shown as chips in the Scope tab.
 - **Consequence:** the PM reviews ~5 groups instead of N items, sees what was never said, and low-confidence items carry their own question — with the same anti-hallucination guarantees as before.
 
+### ADR-014: Coverage gaps are LLM-judged, with the deterministic keyword check as fallback (M4.1)
+- **Status:** Approved
+- **Context:** The keyword-only gap report produced false verdicts that a human would never make: a school app showed "Performance & scale ✓" because "upload grades" contains "load", and missed "Data & reporting" because the client said "grades and attendance records" without the word "report". Keyword matching judges words; coverage is about meaning.
+- **Decision:**
+  - `POST /projects/{id}/requirements/gaps/analyze` (PM-only, 409 without requirements) runs an LLM gap analysis through `run_structured` (budget, `agent_runs`, audit `agent1.gaps_analyzed`, Langfuse) with prompt `agent1_gaps_v1.md`. The payload carries the 11 fixed areas (each with a one-line brief) + requirement texts as untrusted DATA; the prompt judges by meaning, forbids inventing areas/ids, and asks for one concrete PM question per missing area.
+  - The LLM verdict is sanitised by CODE before storage: invented area names are dropped, `matched_ids` filtered to real requirement ids, and every area keeps a deterministic keyword row as fallback (`source: "llm" | "keywords"` per area).
+  - Reports persist per project in `coverage_reports` (migration `e5f8a3b7c6d4`, chained on `d4b7e2c95a61` — single head): data + `meta` (run_id, prompt_version, analyzed_requirements). `GET /requirements/gaps` merges fresh keyword rows with the stored LLM verdicts (recomputing counts) and returns the `llm` block — a page load NEVER re-runs the LLM; only the explicit button does. Analysis is informational: no approval flow, no writes.
+- **Consequence:** meaning beats words (the school app now correctly reports performance/security/etc. as unmentioned and reporting as covered), each missing area ships with a ready client-meeting question, and the keyword layer still answers instantly with zero cost before the PM chooses to analyze.
+
 ## Decision Log
 
 | Date | Decision | Reason |
@@ -131,3 +140,4 @@ OCR; meeting recording/transcription; automatic external messages; one independe
 | 2026-11-14 | Agent 2 professional edition: prompt v2, self-correction, context, richer fields (ADR-011) | PM requested "أكثر احترافية"; live Groq eval passes 14/14 thresholds |
 | 2026-11-15 | Agent 3 platform integration: schedule_drafts, PM approval writes dates (ADR-012) | M6 was an unintegrated library; live e2e proves draft → approve → 16/16 dated |
 | 2026-11-15 | Agent 1 smart review: modules, priorities, clarify questions, bulk decisions, coverage gaps (ADR-013) | PM asked for something more useful than item-by-item review; live e2e passes |
+| 2026-11-17 | Coverage gaps upgraded to LLM-judged with keyword fallback (ADR-014) | Keyword false positives ("upload" → Performance ✓); live Groq e2e judges meaning correctly |

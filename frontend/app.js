@@ -89,7 +89,7 @@ function projectView() {
 function overviewView() {
   const p = state.project, leader = state.team.find(m => m.is_leader);
   const hours = state.team.reduce((n, m) => n + Number(m.capacity_hours_per_week || 0), 0);
-  return `<div class="grid two-col"><section class="card section-card"><h2>Project snapshot</h2><p class="section-intro">Saved in PostgreSQL; survives a browser refresh.</p><div class="keyvals">${kv("Status", STATUS[p.status] || p.status)}${kv("Start", fmtDate(p.start_date))}${kv("Target end", fmtDate(p.end_date))}${kv("Team", state.team.length + " members · " + hours + " h/week")}${kv("Team Leader", leader ? leader.name + (leader.user_email ? " (" + leader.user_email + ")" : "") : "Not assigned")}${kv("Sources", String(p.sources.length))}</div></section><section class="card section-card"><h2>Project brief</h2><p class="section-intro">${esc(p.goal || "No goal added")}</p><div style="white-space:pre-wrap;font-size:13px">${esc(p.brief || "No brief")}</div></section></div><div class="callout">Requirement extraction, scope approval and planning arrive in the next milestones (M4 onward).</div>`;
+  return `<div class="grid two-col"><section class="card section-card"><h2>Project snapshot</h2><p class="section-intro">Saved in PostgreSQL; survives a browser refresh.</p><div class="keyvals">${kv("Status", STATUS[p.status] || p.status)}${kv("Start", fmtDate(p.start_date))}${kv("Target end", fmtDate(p.end_date))}${kv("Team", state.team.length + " members · " + hours + " h/week")}${kv("Team Leader", leader ? leader.name + (leader.user_email ? " (" + leader.user_email + ")" : "") : "Not assigned")}${kv("Sources", String(p.sources.length))}</div></section><section class="card section-card"><h2>Project brief</h2><p class="section-intro">${esc(p.goal || "No goal added")}</p><div style="white-space:pre-wrap;font-size:13px">${esc(p.brief || "No brief")}</div></section></div><div class="callout">Next step: open <b>Scope review</b> to run extraction and approve the requirements — then plan with Agent 2 and schedule with Agent 3. Agents prepare drafts; you approve.</div>`;
 }
 
 function sourcesView() {
@@ -326,13 +326,20 @@ function reqGroupHtml(mod, items) {
 function gapsSection() {
   const g = state.gaps;
   if (!g || g.empty) return "";
-  const chip = a => a.covered
-    ? `<span class="badge green">✓ ${esc(a.area)}</span>`
-    : `<span class="badge" style="background:#fde8e8;color:#b00020">✗ ${esc(a.area)}</span>`;
-  const verdict = g.missing_count
-    ? `${g.missing_count} area(s) nobody mentioned — good questions for the next client meeting.`
-    : "Every standard area was mentioned in the sources.";
-  return `<section class="card section-card" style="margin-top:16px"><h2>Coverage gaps <span class="badge ${g.missing_count ? "" : "green"}">${g.covered_count}/${g.areas.length} covered</span></h2><p class="section-intro">Deterministic check (no LLM): standard product areas matched against the requirement texts. A missing area is a question for the review meeting, not a fact.</p><div style="display:flex;gap:6px;flex-wrap:wrap">${g.areas.map(chip).join("")}</div><p class="subtle" style="margin-top:8px">${esc(verdict)}</p></section>`;
+  const llm = !!(g.llm && g.llm.prompt_version); // stored LLM verdict for THIS project
+  const chip = a => {
+    const tip = a.note ? ` title="${esc(a.note)}"` : "";
+    const mark = a.covered ? "✓" : "✗";
+    const cls = a.covered ? "badge green" : 'badge" style="background:#fde8e8;color:#b00020';
+    const src = a.source === "llm" ? "" : ` <span class="subtle">(keywords)</span>`;
+    return `<span class="${cls}"${tip}>${mark} ${esc(a.area)}${src}</span>`;
+  };
+  const verdict = llm
+    ? `LLM-judged${g.missing_count ? `: ${g.missing_count} area(s) nobody mentioned — good questions for the next client meeting.` : ": every standard area was genuinely covered."}`
+    : `${g.missing_count} area(s) matched by keywords only. Judge meaning, not words — run the LLM analysis.`;
+  const notes = g.areas.filter(a => a.note).map(a => `<div class="row-meta"><span class="badge ${a.covered ? "green" : ""}">${esc(a.area)}</span><span class="subtle">${esc(a.note)}</span></div>`).join("");
+  const analyzed = llm ? `<p class="subtle" style="margin-top:8px">Analyzed ${esc(String(g.llm.analyzed_requirements))} requirement(s) with the LLM at ${esc(fmtDateTime(g.llm.created_at))} — stored for this project, survives a refresh.</p>` : "";
+  return `<section class="card section-card" style="margin-top:16px"><h2 style="display:flex;align-items:center;gap:8px">Coverage gaps <span class="badge ${g.missing_count ? "" : "green"}">${g.covered_count}/${g.areas.length} covered</span>${llm ? '<span class="badge blue">LLM-judged</span>' : ""}<span style="flex:1"></span><button class="btn btn-secondary btn-small" data-action="run-gap-analysis">${llm ? "Re-analyze with LLM" : "Analyze with LLM"}</button></h2><p class="section-intro">Standard product areas vs your requirements. A missing area is a question for the review meeting, not a fact.</p><div style="display:flex;gap:6px;flex-wrap:wrap">${g.areas.map(chip).join("")}</div>${notes ? `<div class="project-list" style="margin-top:10px">${notes}</div>` : ""}<p class="subtle" style="margin-top:8px">${esc(verdict)}</p>${analyzed}</section>`;
 }
 
 function scopeView() {
@@ -412,6 +419,14 @@ Object.assign(actions, {
     await reloadScope(); state.notice = { type: "ok", text: `${ids.length} requirement(s) approved.` }; render();
   },
   "req-reject-group": t => { state.modal = { type: "decide-req-bulk", ids: JSON.parse(t.dataset.ids) }; render(); },
+  "run-gap-analysis": async t => {
+    t.disabled = true; t.textContent = "Analyzing...";
+    try {
+      const report = await post(`/projects/${state.project.id}/requirements/gaps/analyze`, {});
+      state.gaps = report;
+      state.notice = { type: "ok", text: "LLM coverage analysis done." };
+    } finally { render(); }
+  },
   "run-extract": async () => {
     if (!confirm("Run extraction? New draft requirements will be added for review.")) return;
     const job = await post(`/projects/${state.project.id}/jobs`, { type: "agent1.extract" });

@@ -192,4 +192,4 @@ def test_gaps_empty_project():
     pm = pm_headers()
     pid = make_project(pm)["id"]
     body = client.get(f"/projects/{pid}/requirements/gaps", headers=pm).json()
-    assert body == {"areas": [], "covered_count": 0, "missing_count": 0, "missing": [], "empty": True}
+    assert body["empty"] is True and body["areas"] == [] and body["llm"] is None

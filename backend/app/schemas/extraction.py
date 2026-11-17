@@ -36,3 +36,21 @@ class ExtractionOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     requirements: list[ExtractedRequirement] = Field(max_length=60)
+
+
+# ------------------------------------------------------------- coverage gaps (M4.1, LLM-judged)
+class GapAssessment(BaseModel):
+    """One area verdict. matched_ids MUST come from the payload; unknown ones are dropped by code."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    area: str = Field(min_length=2, max_length=120)
+    covered: bool
+    matched_ids: list[int] = Field(default_factory=list, max_length=60)
+    note: str = Field(default="", max_length=200)
+
+
+class GapAnalysisOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    assessments: list[GapAssessment] = Field(min_length=1, max_length=30)

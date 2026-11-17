@@ -80,5 +80,22 @@ def run_agent1_extract(ctx: JobContext, params: dict) -> str:
             ScopeGate(saver).open(project_id)
     except Exception:  # noqa: BLE001
         log.exception('could not open the scope gate for project %s', project_id)
+
+    # M4.1: the LLM coverage-gap analysis runs automatically after every successful extraction,
+    # so the PM opens the Scope tab to an already-judged report. Best effort only: a failure here
+    # never fails the extraction — the manual "Analyze with LLM" button remains the retry path.
+    try:
+        from app.services.coverage_gaps import run_llm_gap_analysis
+
+        with SessionLocal() as db:
+            report = run_llm_gap_analysis(db, project_id, job_id=ctx.job_id)
+            db.commit()
+        log.info(
+            "coverage analysis for project %s: covered=%s missing=%s",
+            project_id, report["covered_count"], report["missing_count"],
+        )
+    except Exception:  # noqa: BLE001
+        log.exception("automatic coverage analysis failed for project %s", project_id)
+
     ctx.heartbeat(progress=100)
     return f"requirements_drafted:{len(created)}"[:255]

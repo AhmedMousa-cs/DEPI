@@ -49,6 +49,12 @@ M4.1 (Agent 1 smart review: modules/priorities/questions/bulk/gaps) is on branch
 - [x] coverage gaps `GET /projects/{id}/requirements/gaps`: 11 standard areas, EN+AR keywords, rejected requirements excluded
 - [x] frontend: requirements grouped by module with per-module Approve/Reject all, ❓ clarify questions shown with an answer hint, coverage-gap chips in the Scope tab
 - [x] live e2e on the dev stack: agent1 v3 job done → 5/5 requirements with modules (Authentication | Bookings | Payments | Records | Scheduling) + priorities; gaps flagged 8 genuinely unmentioned areas; bulk approved a module; bulk reject without comment refused
+- [x] coverage gaps upgraded to LLM-judged (ADR-014): prompt `agent1_gaps_v1.md` via `run_structured`, verdict sanitised by code (invented areas dropped, hallucinated ids filtered), stored per project in `coverage_reports` (migration `e5f8a3b7c6d4`, chained, single head), GET merges fresh keyword rows with the stored verdict and never re-runs the LLM
+- [x] backend suite: 436 passed (13 gap tests: sanitising, persistence, endpoints, roles); migration applied (`alembic current` = e5f8a3b7c6d4)
+- [x] live Groq e2e on the "مدرسة" project (6 requirements): keyword layer had "Performance & scale ✓" (from "upload") and "Data & reporting ✗"; the LLM verdict corrected both — reporting COVERED (reqs 33/34), performance/missing with a ready client question; all 11 areas `source: llm`, run_id stored, GET returns the saved report
+- [x] one-click accept-all chain (ADR-015): bulk-approve reqs → approve scope → LLM gaps → Agent 2 → bulk-approve plan drafts → Agent 3 → lands on Schedule; plan-level bulk endpoints for stories/tasks; "Approve all drafts" button on Work plan; final schedule approval stays manual
+- [x] story-reject cascade: rejecting a story rejects its draft child tasks in the same transaction (per-task Decision + audit `cascade: story:<id>`; decided tasks untouched)
+- [x] backend suite: 440 passed (+4: cascade, bulk stories, bulk tasks + guards); live chain e2e ran the full flow twice (4 reqs → 3 approved/1 rejected → scope → gaps run_id stored → Agent 2 (3 stories, 9 tasks) → bulk approved → Agent 3 draft created)
 
 ## Evidence log (fill in with real output)
 - [ ] clean clone -> make up -> /health ok -> alembic current = 5b7e1c9a2d84 (head)

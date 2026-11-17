@@ -10,7 +10,7 @@ from app.auth.dependencies import require_role
 from app.db.models import AgentRun, Decision, Requirement, User
 from app.db.session import get_db
 from app.observability.langfuse import send_pm_score
-from app.services.coverage_gaps import project_gaps
+from app.services.coverage_gaps import latest_gap_payload, latest_gap_report, project_gaps, run_llm_gap_analysis
 from app.schemas.review import (
     BulkRequirementDecision,
     ReqStatus,
@@ -78,9 +78,43 @@ def requirements_gaps(
     db: Session = Depends(get_db),
     user: User = Depends(require_role("PM")),
 ):
-    """Deterministic coverage check: which standard product areas nobody mentioned yet."""
+    """Fresh keyword rows, overlaid with the latest stored LLM verdict (if any)."""
     get_project_or_404(db, project_id)
-    return project_gaps(db, project_id)
+    result = project_gaps(db, project_id)
+    saved = latest_gap_payload(db, project_id)
+    if saved:
+        llm_rows = {a["area"]: a for a in saved.get("areas", []) if a.get("source") == "llm"}
+        for row in result["areas"]:
+            llm = llm_rows.get(row["area"])
+            if llm:
+                row.update(
+                    covered=llm["covered"], matched_ids=llm["matched_ids"],
+                    note=llm.get("note", ""), source="llm",
+                )
+        missing = [row["area"] for row in result["areas"] if not row["covered"]]
+        result["covered_count"] = len(result["areas"]) - len(missing)
+        result["missing_count"] = len(missing)
+        result["missing"] = missing
+        result["llm"] = latest_gap_report(db, project_id)
+    else:
+        result["llm"] = None
+    return result
+
+
+@router.post("/gaps/analyze", response_model=dict)
+def analyze_gaps(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("PM")),
+):
+    """Run the LLM coverage analysis now (meaning-based), persist it, and return the combined report."""
+    get_project_or_404(db, project_id)
+    try:
+        result = run_llm_gap_analysis(db, project_id)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    db.commit()
+    return result
 
 
 @router.get("/{requirement_id}", response_model=RequirementOut)

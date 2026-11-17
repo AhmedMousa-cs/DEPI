@@ -7,6 +7,14 @@ M5.1 (Agent 2 professional edition) is on branch feature/agent2-v2-professional 
 M6.1 (Agent 3 platform integration) is on branch feature/m6-agent3-integration (stacked on M5.1).
 M4.1 (Agent 1 smart review: modules/priorities/questions/bulk/gaps) is on branch feature/agent1-smart-review (stacked on M6.1).
 M7 (PM command center: portfolio/resources/risks + assistant chat) is on branch feature/m7-pm-command-center (stacked on feature/agent1-smart-review).
+M8 (frontend polish: dark mode + Arabic/RTL + portfolio charts) is on branch feature/m8-polish (stacked on M7).
+
+## M8 evidence (frontend polish)
+- [x] `node --check` passes; verified in a real browser: both toggles persist across a reload (`nx-theme`, `nx-lang` in localStorage)
+- [x] Dark mode: variable-only override (`[data-theme="dark"]`); sidebar/topbar/buttons all legible; no console errors
+- [x] Arabic/RTL: `dir=rtl` flips the shell; dictionary + regex DOM translation covers chrome, portfolio, tabs, empty states and dynamic strings (counts, health reasons, "next deadline"); dates render in the Arabic locale (`30 نوفمبر 2026`); un-translated strings degrade to English, never break
+- [x] Charts (no libraries): health donut + progress bars (Projects), utilization/capacity bars (Resources), risks-by-type bars + severity donut (Risks)
+- [x] Live Arabic chat e2e in dark RTL mode: Arabic question → Arabic answer naming the draft backlogs (مدرسة 17, مطعم 13, Clinic Booking 1) with Arabic suggestion chips
 
 ## M7 evidence (PM command center)
 - [x] full backend suite in the container: **453 passed** (441 + 12 new portfolio tests)

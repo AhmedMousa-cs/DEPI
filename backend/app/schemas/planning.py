@@ -221,6 +221,27 @@ class TaskDecision(BaseModel):
         return self
 
 
+class BulkPlanDecision(BaseModel):
+    """One PM decision for many stories or tasks at once (plan-level review).
+
+    Note: bulk applies the SAME decision to every id; edits stay per-item.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    ids: list[int] = Field(min_length=1, max_length=200)
+    decision: Literal["approved", "rejected"]
+    comment: str = Field(default="", max_length=2000)
+
+    @model_validator(mode="after")
+    def _rules(self):
+        if len(set(self.ids)) != len(self.ids):
+            raise ValueError("ids must be unique")
+        if self.decision == "rejected" and not self.comment:
+            raise ValueError("a comment is required when rejecting")
+        return self
+
+
 class CoverageOut(BaseModel):
     approved_requirements: int
     requirements_without_story: list[int]

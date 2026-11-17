@@ -6,7 +6,7 @@ const MAX_UPLOAD = 5 * 1024 * 1024;
 const STATUS = { setup: "Setup", planning: "Planning", scope_review: "Scope review", plan_review: "Plan review", active: "Active", closed: "Closed" };
 const KIND = { brief: "Brief", transcript: "Transcript", note: "Note", file: "File" };
 
-const state = { me: null, projects: [], project: null, team: [], leaders: [], page: "portfolio", tab: "overview", modal: null, notice: null, navOpen: false, reqs: [], scope: null, gaps: null, reqFilter: "all", job: null, stories: [], tasks: [], coverage: null, planFilter: "all", planJob: null, schedule: null, scheduleJob: null };
+const state = { me: null, projects: [], project: null, team: [], leaders: [], page: "portfolio", tab: "overview", modal: null, notice: null, navOpen: false, reqs: [], scope: null, gaps: null, reqFilter: "all", job: null, stories: [], tasks: [], coverage: null, planFilter: "all", planJob: null, schedule: null, scheduleJob: null, chain: null };
 const app = document.getElementById("app");
 const isPM = () => state.me && state.me.role === "PM";
 
@@ -291,6 +291,18 @@ function pollJob(id) {
   tick(); jobTimer = setInterval(tick, 3000);
 }
 
+async function waitForJob(id, timeoutMs = 300000) {
+  /** Await a job until it finishes; used by the accept-all chain (throws on failure). */
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 2500));
+    const j = await api(`/jobs/${id}`);
+    if (["done", "waiting_for_pm"].includes(j.status)) return j;
+    if (["failed", "cancelled"].includes(j.status)) throw new Error(j.error || `job ${j.status}`);
+  }
+  throw new Error("the job took too long");
+}
+
 function reqCounts() {
   const c = { all: state.reqs.length, draft: 0, approved: 0, rejected: 0, unverified: 0 };
   state.reqs.forEach(r => { if (c[r.status] != null) c[r.status]++; if (!r.quote_verified) c.unverified++; });
@@ -359,7 +371,8 @@ function scopeView() {
     .map(([mod, items]) => reqGroupHtml(mod, items))
     .join("");
   const canApprove = c.draft === 0 && c.all > 0;
-  return `<div class="page-head"><div><div class="eyebrow">US02</div><h1>Scope review</h1><p>Requirements grouped by feature area. Approve a whole module in one click, or drill into any item.</p></div><div><button class="btn btn-secondary" data-action="run-extract"${running ? " disabled" : ""}>${running ? "Extracting..." : "Run extraction"}</button></div></div>${jobLine}<div class="callout">Gate: <b>${esc(gate)}</b> · Project status: <b>${esc(sc ? sc.project_status : state.project.status)}</b></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin:12px 0">${chips}</div>${groups ? groups : '<section class="card"><div class="card-body"><div class="empty"><div class="empty-icon">◈</div><h3>No requirements here</h3><p>Run the extraction, or change the filter.</p></div></div></section>'}${gapsSection()}<section class="card section-card" style="margin-top:16px"><h2>Approve scope</h2><p class="section-intro">Every requirement must be decided first.</p><div class="form-grid">${field("Comment (optional)", '<input id="scope-comment" maxlength="2000">', true)}</div><div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-primary" data-action="approve-scope"${canApprove ? "" : " disabled"}>Approve scope</button><button class="btn btn-quiet" data-action="open-gate">Re-open gate</button></div>${canApprove ? "" : `<p class="subtle">${c.all === 0 ? "Run the extraction first." : c.draft + " draft(s) still need a decision."}</p>`}</section>`;
+  const chainLine = state.chain ? `<div class="callout"><b>${esc(state.chain)}</b> <span class="subtle">The whole chain is running — keep this tab open.</span></div>` : "";
+  return `<div class="page-head"><div><div class="eyebrow">US02</div><h1>Scope review</h1><p>Requirements grouped by feature area. Approve a whole module in one click, or drill into any item.</p></div><div><button class="btn btn-primary" data-action="accept-all"${state.chain || c.all === 0 ? " disabled" : ""} title="Approve every draft, approve the scope, run the LLM gap analysis, then Agent 2 and Agent 3">${state.chain ? "Working..." : "✓ Accept all & run agents"}</button><button class="btn btn-secondary" data-action="run-extract"${running || state.chain ? " disabled" : ""}>${running ? "Extracting..." : "Run extraction"}</button></div></div>${chainLine}${jobLine}<div class="callout">Gate: <b>${esc(gate)}</b> · Project status: <b>${esc(sc ? sc.project_status : state.project.status)}</b></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin:12px 0">${chips}</div>${groups ? groups : '<section class="card"><div class="card-body"><div class="empty"><div class="empty-icon">◈</div><h3>No requirements here</h3><p>Run the extraction, or change the filter.</p></div></div></section>'}${gapsSection()}<section class="card section-card" style="margin-top:16px"><h2>Approve scope</h2><p class="section-intro">Every requirement must be decided first.</p><div class="form-grid">${field("Comment (optional)", '<input id="scope-comment" maxlength="2000">', true)}</div><div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-primary" data-action="approve-scope"${canApprove ? "" : " disabled"}>Approve scope</button><button class="btn btn-quiet" data-action="open-gate">Re-open gate</button></div>${canApprove ? "" : `<p class="subtle">${c.all === 0 ? "Run the extraction first." : c.draft + " draft(s) still need a decision."}</p>`}</section>`;
 }
 
 function scopeModal() {
@@ -441,6 +454,44 @@ Object.assign(actions, {
     await post(`/projects/${state.project.id}/scope/approve`, { comment: el ? el.value : "" });
     await reloadProject(); await reloadScope();
     state.notice = { type: "ok", text: "Scope approved." }; render();
+  },
+  "accept-all": async () => {
+    const id = state.project.id;
+    if (!confirm("Accept everything?\n\n1. All draft requirements are approved\n2. The scope is approved\n3. The LLM coverage analysis runs\n4. Agent 2 generates the plan and all its drafts are approved\n5. Agent 3 computes the schedule draft\n\nYou still review and approve the schedule yourself — that is what writes the dates.")) return;
+    state.chain = "Approving requirements..."; render();
+    try {
+      const drafts = state.reqs.filter(r => r.status === "draft").map(r => r.id);
+      if (drafts.length) await post(`/projects/${id}/requirements/decision`, { ids: drafts, decision: "approved" });
+      state.chain = "Approving the scope..."; render();
+      await post(`/projects/${id}/scope/approve`, { comment: "Accepted all requirements." });
+      await reloadProject(); await reloadScope(); render();
+      state.chain = "Analyzing coverage gaps with the LLM..."; render();
+      try { state.gaps = await post(`/projects/${id}/requirements/gaps/analyze`, {}); }
+      catch (e) { if (e.message === "unauthorized") throw e; }
+      state.chain = "Running Agent 2 (stories & tasks)..."; render();
+      const j2 = await post(`/projects/${id}/jobs`, { type: "agent2.plan" });
+      state.planJob = j2; await waitForJob(j2.id);
+      await reloadPlan();
+      state.chain = "Approving the plan drafts..."; render();
+      const sIds = state.stories.filter(s => s.review_status === "draft").map(s => s.id);
+      if (sIds.length) await post(`/projects/${id}/stories/decision`, { ids: sIds, decision: "approved" });
+      await reloadPlan();
+      const rejectedStories = new Set(state.stories.filter(s => s.review_status === "rejected").map(s => s.id));
+      const tIds = state.tasks.filter(x => x.review_status === "draft" && !rejectedStories.has(x.story_id)).map(x => x.id);
+      if (tIds.length) await post(`/projects/${id}/tasks/decision`, { ids: tIds, decision: "approved" });
+      await reloadPlan(); render();
+      state.chain = "Running Agent 3 (schedule)..."; render();
+      const j3 = await post(`/projects/${id}/jobs`, { type: "agent3.schedule" });
+      state.scheduleJob = j3; await waitForJob(j3.id);
+      await reloadSchedule();
+      state.chain = null; state.tab = "schedule";
+      state.notice = { type: "ok", text: "Everything is ready — review the schedule draft and approve it to write the dates." };
+      render();
+    } catch (e) {
+      state.chain = null;
+      state.notice = { type: "error", text: "Stopped here: " + (e.message || "unknown error") + " — you can continue manually from this step." };
+      render();
+    }
   },
 });
 
@@ -546,7 +597,7 @@ function planView() {
   const stories = state.stories.filter(planMatch);
   const list = stories.map(planStoryCard).join("");
   const hint = !plannable ? `<p class="subtle">Agent 2 only runs after the scope is approved (project status: ${esc(state.project.status)}).</p>` : "";
-  return `<div class="page-head"><div><div class="eyebrow">US03</div><h1>Work plan</h1><p>Stories and tasks generated from approved requirements. The PM reviews every draft before it becomes the plan.</p></div><div><button class="btn btn-primary" data-action="run-plan"${running || !plannable ? " disabled" : ""}>${running ? "Planning..." : "Run Agent 2"}</button>${hint}</div></div>${jobLine}${coverageSection(c)}<div class="page-head" style="margin-top:18px"><div><h1 style="font-size:18px">Stories & tasks</h1><p>Approve, edit or reject every draft. Your decisions survive an Agent 2 re-run.</p></div></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin:12px 0">${chips}</div><section class="card"><div class="card-body">${list ? `<div class="project-list">${list}</div>` : '<div class="empty"><div class="empty-icon">◈</div><h3>No stories yet</h3><p>Approve the scope, then run Agent 2.</p></div>'}</div></section>`;
+  return `<div class="page-head"><div><div class="eyebrow">US03</div><h1>Work plan</h1><p>Stories and tasks generated from approved requirements. The PM reviews every draft before it becomes the plan.</p></div><div><button class="btn btn-primary" data-action="plan-approve-all"${state.chain ? " disabled" : ""} title="Approve every draft story and task in one transaction each">Approve all drafts</button><button class="btn btn-secondary" data-action="run-plan"${running || !plannable ? " disabled" : ""}>${running ? "Planning..." : "Run Agent 2"}</button>${hint}</div></div>${jobLine}${coverageSection(c)}<div class="page-head" style="margin-top:18px"><div><h1 style="font-size:18px">Stories & tasks</h1><p>Approve, edit or reject every draft. Your decisions survive an Agent 2 re-run.</p></div></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin:12px 0">${chips}</div><section class="card"><div class="card-body">${list ? `<div class="project-list">${list}</div>` : '<div class="empty"><div class="empty-icon">◈</div><h3>No stories yet</h3><p>Approve the scope, then run Agent 2.</p></div>'}</div></section>`;
 }
 
 function planModal() {
@@ -581,6 +632,19 @@ Object.assign(actions, {
     if (!confirm("Run Agent 2? New draft stories and tasks will be generated from the approved requirements. PM decisions are kept.")) return;
     const job = await post(`/projects/${state.project.id}/jobs`, { type: "agent2.plan" });
     state.planJob = job; render(); pollPlanJob(job.id);
+  },
+  "plan-approve-all": async () => {
+    const id = state.project.id;
+    const sIds = state.stories.filter(s => s.review_status === "draft").map(s => s.id);
+    if (!sIds.length && !state.tasks.some(x => x.review_status === "draft")) { state.notice = { type: "ok", text: "Nothing to approve — every story and task is decided." }; render(); return; }
+    if (!confirm(`Approve all draft stories (${sIds.length}) and their draft tasks in one go?`)) return;
+    if (sIds.length) await post(`/projects/${id}/stories/decision`, { ids: sIds, decision: "approved" });
+    await reloadPlan();
+    const rejectedStories = new Set(state.stories.filter(s => s.review_status === "rejected").map(s => s.id));
+    const tIds = state.tasks.filter(x => x.review_status === "draft" && !rejectedStories.has(x.story_id)).map(x => x.id);
+    if (tIds.length) await post(`/projects/${id}/tasks/decision`, { ids: tIds, decision: "approved" });
+    await reloadPlan();
+    state.notice = { type: "ok", text: "Plan approved — Agent 3 can now compute the schedule." }; render();
   },
 });
 

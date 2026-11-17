@@ -98,6 +98,7 @@ def coverage_gaps(requirements: list[Requirement]) -> list[dict]:
             "area": area.name,
             "covered": bool(matched),
             "matched_ids": matched,
+            "source": "keywords",
         })
     return rows
 

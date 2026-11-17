@@ -466,8 +466,13 @@ Object.assign(actions, {
       await post(`/projects/${id}/scope/approve`, { comment: "Accepted all requirements." });
       await reloadProject(); await reloadScope(); render();
       state.chain = "Analyzing coverage gaps with the LLM..."; render();
-      try { state.gaps = await post(`/projects/${id}/requirements/gaps/analyze`, {}); }
-      catch (e) { if (e.message === "unauthorized") throw e; }
+      if (state.gaps && state.gaps.llm && state.gaps.llm.prompt_version) {
+        // Agent 1 already ran the analysis after extraction; the stored report covers these reqs
+        state.notice = { type: "ok", text: "Using the coverage analysis that ran after the extraction." }; render();
+      } else {
+        try { state.gaps = await post(`/projects/${id}/requirements/gaps/analyze`, {}); }
+        catch (e) { if (e.message === "unauthorized") throw e; }
+      }
       state.chain = "Running Agent 2 (stories & tasks)..."; render();
       const j2 = await post(`/projects/${id}/jobs`, { type: "agent2.plan" });
       state.planJob = j2; await waitForJob(j2.id);

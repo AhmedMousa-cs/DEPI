@@ -114,3 +114,26 @@ def test_analyze_needs_requirements_and_the_pm_role():
     pid2 = make_project(pm)["id"]
     seed_gap_requirements(pid2)
     assert client.post(f"/projects/{pid2}/requirements/gaps/analyze", json={}, headers=tl_headers()).status_code == 403
+
+
+def test_extraction_job_runs_the_gap_analysis_automatically(monkeypatch):
+    """The PM opens the Scope tab to an already-stored LLM report right after Agent 1."""
+    from app.agents import agent1_extract
+    from app.services.jobs import process_one
+    from test_agent1_job import TRANSCRIPT, fake_extraction
+
+    monkeypatch.setattr(
+        agent1_extract, "extract_requirements_chunked",
+        fake_extraction([("Online booking", "needs online booking")]),
+    )
+    pm = pm_headers()
+    pid = make_project(pm, transcript=TRANSCRIPT)["id"]
+    r = client.post(f"/projects/{pid}/jobs", json={"type": "agent1.extract"}, headers=pm)
+    assert r.status_code == 202
+    assert process_one() is True
+
+    body = client.get(f"/projects/{pid}/requirements/gaps", headers=pm).json()
+    assert body["empty"] is False
+    assert body["llm"] is not None and body["llm"]["prompt_version"] == "agent1_gaps_v1"
+    # the conftest fake judges no known area: every row falls back to keywords — still a stored report
+    assert all(a["source"] == "keywords" for a in body["areas"])

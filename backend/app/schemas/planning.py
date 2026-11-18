@@ -11,6 +11,16 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 Rejectable = Literal["approved", "rejected", "modified"]
 ReviewStatus = Literal["draft", "approved", "rejected"]
 
+
+class TaskProgressUpdate(BaseModel):
+    """M9 delivery tracking: the PM records execution status/progress on one approved task."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    status: Literal["todo", "in_progress", "done"]
+    progress_pct: int | None = Field(default=None, ge=0, le=100)
+
+
 STORY_REF = r"^S[1-9][0-9]*$"
 TASK_REF = r"^T[1-9][0-9]*$"
 MIN_ESTIMATE_HOURS = 0.5

@@ -176,6 +176,16 @@ OCR; meeting recording/transcription; automatic external messages; one independe
   - Deterministic footer states the governance rule: agents never write progress, dates or decisions.
 - **Consequence:** stakeholders get a shareable status report that always matches the database; no new service or migration, and Arabic content renders correctly.
 
+### ADR-020: Change management — approved items change only via audited change requests (M11)
+- **Status:** Approved
+- **Context:** After the PM approves a task it is locked — but real projects change: deadlines move, estimates grow, work is reassigned. The PM asked for proper change management (roadmap #3, "كبير"). Teammate Agent 4 plan-versions work stays on its own branch; no overlap.
+- **Decision:**
+  - **New table `change_requests`** (migration `d9e4f7b2c5a3`, chained on the single head): project, kind (`task_update`), target task, a field-level **payload diff** (`before`/`after`, only fields that actually change), a stored **impact** (computed at proposal time), reason, status `draft|approved|rejected`, created_by/reviewed_by/at.
+  - **Deterministic impact analysis by code** (`analyze_task_change`): delaying an end date flags the delay; a **critical-path** task delay is high severity and notes the project end moves; **dependent tasks** (from `task_dependencies`) that would need their windows shifted are listed; pushing a start into the past is low; changing the estimate or assignee triggers a **capacity check** — the assignee's hours in the affected window vs their weekly capacity (high when over). Overall severity = worst finding. No LLM.
+  - **API (PM-only)**: `GET /projects/{pid}/changes[?status=]`, `POST /projects/{pid}/changes` (propose; draft tasks get 409 — they are edited in review, approved tasks only here), `POST /projects/{pid}/changes/{id}/decision` (approve applies the change and writes audit `change.decision` with the applied snapshot; reject closes it untouched; re-deciding is 409). Proposals write audit `change.proposed`.
+  - **Frontend**: a new **Changes** tab (chips: open / high-impact / applied) listing each request with its diff table, impact findings and Approve & apply / Reject buttons; approved tasks in the Work plan get a **"Change…"** button that opens a propose modal (title, estimate, dates, assignee, reason). Proposing jumps to the Changes tab with the computed impact in the notice.
+- **Consequence:** approved scope is never mutated silently — every change is proposed with its consequences, decided once, applied atomically and audited; agents still never write changes.
+
 ## Decision Log
 
 | Date | Decision | Reason |
@@ -193,3 +203,4 @@ OCR; meeting recording/transcription; automatic external messages; one independe
 | 2026-11-17 | Frontend polish: dark mode + Arabic/RTL (DOM translation) + SVG portfolio charts (ADR-017) | PM asked for a more professional dashboard; both toggles persist, charts are dependency-free |
 | 2026-11-18 | Delivery tracking: PM-only PATCH task progress + Gantt on Schedule tab (ADR-018) | PM asked for a Gantt + execution tracking; todo→0/done→100 rules, audited, portfolio auto-syncs |
 | 2026-11-18 | PDF export: server-side reportlab report with bundled Amiri font (ADR-019) | PM asked for PDF export; report mirrors the DB (no LLM), Arabic shaping handled |
+| 2026-11-18 | Change management: approved tasks change only via audited change requests with computed impact (ADR-020) | PM asked for proper change management ("كبير"); draft→decide flow with deterministic impact, applied changes audited |

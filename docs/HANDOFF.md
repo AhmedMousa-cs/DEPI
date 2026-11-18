@@ -10,6 +10,16 @@ M7 (PM command center: portfolio/resources/risks + assistant chat) is on branch 
 M8 (frontend polish: dark mode + Arabic/RTL + portfolio charts) is on branch feature/m8-polish (stacked on M7).
 M9 (delivery tracking + Gantt) is on branch feature/m9-gantt-delivery (stacked on feature/m8-polish).
 M10 (PDF export) is on branch feature/m10-pdf-export (stacked on feature/m9-gantt-delivery).
+M11 (change management) is on branch feature/m11-change-management (stacked on feature/m10-pdf-export).
+
+## M11 evidence (change management)
+- [x] New table `change_requests` (migration `d9e4f7b2c5a3`, chained on the single head `a7c3e1d9f2b8`; applied to the dev DB, `alembic current` = d9e4f7b2c5a3): field-level payload diff (before/after, only fields that actually change), stored deterministic impact, reason, status draft|approved|rejected
+- [x] 6 new tests (`tests/test_change_management.py`): deterministic impact (critical delay + dependent shift), approve applies + reject closes + re-decide 409, capacity overload flag, draft task 409 / unknown 404 / no-op 422, TL 403, list project-scoped + status filter - **6/6 pass**
+- [x] Full backend suite in the container: **469 passed** (463 + 6 change tests); single-run policy respected
+- [x] Impact is computed by CODE, not an LLM: critical-path end delay  high + project end moves, dependent tasks listed from `task_dependencies`, past start  low, estimate/assignee change  capacity check (load vs weekly capacity in the window); overall severity = worst finding
+- [x] API PM-only: `GET /projects/{pid}/changes[?status=]`, `POST /projects/{pid}/changes` (201, no-op 422, draft task 409, unknown task 404), `POST /projects/{pid}/changes/{id}/decision` (approve applies the change + audit `change.decision` with the applied snapshot; reject closes untouched; re-decide 409); proposals write audit `change.proposed`
+- [x] Frontend: **Changes** tab (chips open / high-impact / applied) with diff table, impact findings, Approve & apply / Reject (with confirm); approved tasks in the Work plan get a **"Change..."** button  propose modal; proposing jumps to the Changes tab with the computed impact in the notice
+- [x] Live e2e in the browser (project 14 "مدرسه"): proposed CR #1 on critical task #76 (end  2026-11-27) with an Arabic reason  impact high, 2 findings; Approve & apply applied it (DB: task end = 2026-11-27); audit rows 350-351 (`change.proposed` + `change.decision` with the applied snapshot); Arabic RTL verified ("التغييرات", chips "طلبات تغيير مفتوحة / أثر عالٍ / مطبَّق"); zero console errors
 
 ## M10 evidence (PDF export)
 - [x] `GET /projects/{pid}/report.pdf` PM-only; reportlab + bundled Amiri (Regular+Bold, Latin+Arabic coverage verified via cmap); arabic_reshaper + python-bidi for shaping/order — no LLM anywhere

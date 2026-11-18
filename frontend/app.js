@@ -210,6 +210,29 @@ const AR = {
   "PDF report downloaded.": "تم تنزيل تقرير PDF.",
   "PDF export failed:": "فشل تصدير PDF:",
   "Progress saved:": "تم حفظ التقدم:",
+  "Changes": "التغييرات",
+  "Change…": "تغيير…",
+  "Propose a change": "اقتراح تغيير",
+  "The task is approved — your edit becomes a tracked change request with a computed impact.": "المهمة معتمدة — تعديلك يصبح طلب تغيير مُتتبَّع مع تحليل أثر محسوب بالكود.",
+  "Estimate (h)": "التقدير (ساعة)",
+  "Assignee": "المسؤول",
+  "Why this change *": "سبب التغيير *",
+  "Propose with impact analysis": "اقتراح مع تحليل الأثر",
+  "Open change requests": "طلبات تغيير مفتوحة",
+  "High impact": "أثر عالٍ",
+  "Medium impact": "أثر متوسط",
+  "Low impact": "أثر منخفض",
+  "Applied": "مطبَّق",
+  "No change requests": "لا طلبات تغيير",
+  "Approved tasks are locked. Propose a change from the Work plan — the impact is computed before you decide.": "المهام المعتمدة مقفلة. اقترح تغييرًا من خطة العمل — الأثر يُحسب قبل قرارك.",
+  "Approve & apply": "اعتماد وتطبيق",
+  "Title": "العنوان",
+  "Change approved and applied.": "تم اعتماد التغيير وتطبيقه.",
+  "Change request rejected.": "تم رفض طلب التغيير.",
+  "created — computed impact:": "أُنشئ — الأثر المحسوب:",
+  "finding": "ملاحظة",
+  "findings": "ملاحظات",
+  "Decide below.": "قرر في الأسفل.",
 };
 
 /* Regex rules for dynamic strings (numbers, dates) the exact map cannot cover. */
@@ -242,6 +265,7 @@ const AR_PATTERNS = [
 ];
 
 function t(s) { return state.lang === "ar" ? (AR[s] || s) : s; }
+const tr = t; // alias for contexts where a task param shadows `t`
 
 function translateDom(root) {
   if (state.lang !== "ar" || !root) return;
@@ -433,9 +457,9 @@ function portfolioView() {
 function projectView() {
   const p = state.project;
   const tabs = [["overview", "Overview"], ["sources", "Sources (" + (p.sources || []).length + ")"], ["team", "Team (" + state.team.length + ")"]];
-  if (isPM()) tabs.push(["scope", "Scope review"], ["plan", "Work plan"], ["schedule", "Schedule"]);
+  if (isPM()) tabs.push(["scope", "Scope review"], ["plan", "Work plan"], ["schedule", "Schedule"], ["changes", "Changes"]);
   const later = ["Updates (M7)", "Decisions (M8)"];
-  return `<div class="workspace-head"><div class="workspace-title"><div class="project-monogram">${esc((p.name || "P")[0].toUpperCase())}</div><div><h1>${esc(p.name)}</h1><p>${esc(p.goal || "No goal added")}</p></div></div><div style="display:flex;gap:8px;align-items:center">${statusBadge(p.status)}${isPM() ? `<button class="btn btn-secondary btn-small" data-action="export-pdf">⬇ ${t("Export PDF")}</button><button class="btn btn-secondary btn-small" data-action="modal" data-modal="edit-project">${t("Edit project")}</button>` : ""}</div></div><div class="tabs">${tabs.map(t => `<button class="${state.tab === t[0] ? "active" : ""}" data-action="tab" data-tab="${t[0]}">${esc(t[1])}</button>`).join("")}${later.map(l => `<button disabled style="opacity:.45;cursor:not-allowed" title="Not available yet">${esc(l)}</button>`).join("")}</div>${state.tab === "sources" ? sourcesView() : state.tab === "team" ? teamView() : state.tab === "scope" ? scopeView() : state.tab === "plan" ? planView() : state.tab === "schedule" ? scheduleView() : overviewView()}`;
+  return `<div class="workspace-head"><div class="workspace-title"><div class="project-monogram">${esc((p.name || "P")[0].toUpperCase())}</div><div><h1>${esc(p.name)}</h1><p>${esc(p.goal || "No goal added")}</p></div></div><div style="display:flex;gap:8px;align-items:center">${statusBadge(p.status)}${isPM() ? `<button class="btn btn-secondary btn-small" data-action="export-pdf">⬇ ${t("Export PDF")}</button><button class="btn btn-secondary btn-small" data-action="modal" data-modal="edit-project">${t("Edit project")}</button>` : ""}</div></div><div class="tabs">${tabs.map(t => `<button class="${state.tab === t[0] ? "active" : ""}" data-action="tab" data-tab="${t[0]}">${esc(t[1])}</button>`).join("")}${later.map(l => `<button disabled style="opacity:.45;cursor:not-allowed" title="Not available yet">${esc(l)}</button>`).join("")}</div>${state.tab === "sources" ? sourcesView() : state.tab === "team" ? teamView() : state.tab === "scope" ? scopeView() : state.tab === "plan" ? planView() : state.tab === "schedule" ? scheduleView() : state.tab === "changes" ? changeView() : overviewView()}`;
 }
 
 function overviewView() {
@@ -487,6 +511,7 @@ function modalView() {
     return modalShell("Set Team Leader", "The linked user gets read access to this project.", "leader",
       `<div class="form-grid">${field("Team member", `<select name="member_id">${members}</select>`)}${field("Team Leader login", `<select name="user_email">${users}</select>`)}</div>`, "Assign");
   }
+  if (m.type === "propose-change") return proposeChangeModal(m.task);
   return "";
 }
 
@@ -625,6 +650,27 @@ const submitters = {
     const existing = state.modal.member, base = `/projects/${state.project.id}/team`;
     if (existing) await patch(`${base}/${existing.id}`, body); else await post(base, body);
     await reloadProject(); state.modal = null; state.notice = { type: "ok", text: existing ? "Team member updated." : "Team member added." }; render();
+  },
+  "propose-change": async form => {
+    const d = new FormData(form);
+    const num = v => { const x = String(v).trim(); return x === "" ? null : Number(x); };
+    const body = {
+      task_id: Number(d.get("task_id")),
+      title: nul(d.get("title")),
+      estimate_hours: num(d.get("estimate_hours")),
+      start: nul(d.get("start")),
+      end: nul(d.get("end")),
+      assignee_member_id: num(d.get("assignee_member_id")),
+      reason: d.get("reason"),
+    };
+    const cr = await post(`/projects/${state.project.id}/changes`, body);
+    state.modal = null;
+    state.tab = "changes";
+    await reloadChanges();
+    const n = ((cr.impact || {}).impacts || []).length;
+    const sev = (cr.impact || {}).severity;
+    state.notice = { type: "ok", text: `Change request #${cr.id} created — computed impact: ${sev} (${n} finding${n === 1 ? "" : "s"}). Decide below.` };
+    render();
   },
   "import-csv": async form => {
     const file = form.elements.file.files[0];
@@ -842,6 +888,9 @@ Object.assign(actions, {
         if (active) { state.scheduleJob = active; pollScheduleJob(active.id); }
       } catch (e) { if (e.message === "unauthorized") throw e; }
     }
+    if (t.dataset.tab === "changes") {
+      await reloadChanges();
+    }
     baseTab(t);
   },
   "scope-filter": t => { state.reqFilter = t.dataset.f; render(); },
@@ -988,7 +1037,9 @@ function planTaskRow(t) {
   const deps = (t.depends_on || []).map(id => `<span class="badge">${esc(taskLabel(id))}</span>`).join(" ");
   const actions = t.review_status === "draft"
     ? `<div class="item-actions" style="margin:0"><button class="btn btn-primary btn-small" data-action="task-approve" data-id="${t.id}">Approve</button><button class="btn btn-secondary btn-small" data-action="task-edit" data-id="${t.id}">Edit</button><button class="btn btn-danger btn-small" data-action="task-reject" data-id="${t.id}">Reject</button></div>`
-    : "";
+    : t.review_status === "approved"
+      ? `<div class="item-actions" style="margin:0"><button class="btn btn-secondary btn-small" data-action="modal-change" data-id="${t.id}">${tr("Change…")}</button></div>`
+      : "";
   const order = t.plan_order ? `<span class="badge">Step ${esc(t.plan_order)}</span>` : "";
   const critical = t.is_critical ? '<span class="badge" style="background:#fff4e5;color:#9a5b00">Critical path</span>' : "";
   return `<div class="project-row" style="align-items:flex-start"><div style="flex:1;min-width:0"><div class="project-title">${esc(t.title)} ${planBadge(t.review_status)}${critical}</div><div class="row-meta">${order}<span class="badge">${esc(t.estimate_hours)} h</span><span class="badge">${esc(t.status)}</span><span class="subtle">Confidence ${Math.round((Number(t.confidence) || 0) * 100)}%</span>${deps ? `<span class="subtle">Depends on:</span> ${deps}` : ""}</div>${t.rationale ? `<div class="subtle">Why: ${esc(t.rationale)}</div>` : ""}${t.pm_comment ? `<div class="subtle">PM: ${esc(t.pm_comment)}</div>` : ""}</div>${actions}</div>`;
@@ -1206,6 +1257,67 @@ function ganttView() {
 
 const DELIVERY_STATUS = { todo: "To do", in_progress: "In progress", done: "Done" };
 
+/* ---------- M11 change management (approved-task edits as formal change requests) ---------- */
+async function reloadChanges() {
+  const id = state.project.id;
+  const [changes, tasks] = await Promise.all([
+    api(`/projects/${id}/changes`).catch(e => { if (e.message === "unauthorized") throw e; return []; }),
+    state.tasks.length ? Promise.resolve(state.tasks) : api(`/projects/${id}/tasks`),
+  ]);
+  state.changes = changes;
+  if (tasks !== state.tasks) state.tasks = tasks;
+}
+
+const CHANGE_FIELD_LABEL = { title: "Title", estimate_hours: "Estimate (h)", start: "Start", end: "End", assignee_member_id: "Assignee" };
+
+function changeView() {
+  const list = state.changes || [];
+  const open = list.filter(c => c.status === "draft");
+  const high = list.filter(c => c.status === "draft" && c.impact && c.impact.severity === "high");
+  const memberName = id => { const m = state.team.find(x => x.id === id); return m ? m.name : "#" + id; };
+  const fmtVal = (k, v) => k === "assignee_member_id" ? (v == null ? "—" : memberName(v)) : (v == null ? "—" : String(v));
+
+  const cards = list.map(c => {
+    const p = c.payload || {}, imp = c.impact || {};
+    const task = state.tasks.find(t => t.id === c.target_task_id);
+    const diffs = Object.keys(p.after || {}).map(k =>
+      `<tr><td style="padding:3px 8px;border-top:1px solid var(--line)">${t(CHANGE_FIELD_LABEL[k] || k)}</td><td style="padding:3px 8px;border-top:1px solid var(--line);color:var(--ink-soft)">${esc(fmtVal(k, (p.before || {})[k]))}</td><td style="padding:3px 8px;border-top:1px solid var(--line)">→</td><td style="padding:3px 8px;border-top:1px solid var(--line);font-weight:700">${esc(fmtVal(k, p.after[k]))}</td></tr>`
+    ).join("");
+    const sev = imp.severity === "high" ? '<span class="badge red">High impact</span>' : imp.severity === "medium" ? '<span class="badge blue">Medium impact</span>' : '<span class="badge green">Low impact</span>';
+    const impacts = (imp.impacts || []).map(i => `<div class="row-meta"><span class="subtle">• ${esc(i.message)}</span></div>`).join("");
+    const decided = c.status === "draft"
+      ? `<div class="item-actions" style="margin-top:8px"><button class="btn btn-primary btn-small" data-action="change-decide" data-id="${c.id}" data-status="approved">Approve & apply</button><button class="btn btn-danger btn-small" data-action="change-decide" data-id="${c.id}" data-status="rejected">Reject</button></div>`
+      : `<div class="row-meta" style="margin-top:6px"><span class="subtle">${c.status === "approved" ? "Applied" : "Rejected"} · ${esc(fmtDateTime(c.reviewed_at))}</span></div>`;
+    return `<div class="pf-card"><div style="display:flex;gap:12px;align-items:flex-start;flex:1;min-width:0"><div style="flex:1;min-width:0">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="project-title">${esc(task ? task.title : "Task #" + c.target_task_id)}</span>${c.status === "draft" ? '<span class="badge blue">Draft</span>' : c.status === "approved" ? '<span class="badge green">Approved</span>' : '<span class="badge">Rejected</span>'}${sev}</div>
+      <div class="row-meta"><span class="subtle">${esc(c.reason)}</span></div>
+      <table style="border-collapse:collapse;margin:6px 0;font-size:13px"><tbody>${diffs}</tbody></table>
+      ${impacts}
+      <div class="row-meta"><span class="subtle">${esc(c.created_by)} · ${esc(fmtDateTime(c.created_at))}</span></div>
+    </div></div>${decided}</div>`;
+  }).join("");
+
+  const chips = `<div class="pf-chips">${pfChip(open.length, t("Open change requests"), open.length ? "warn" : "ok")}${pfChip(high.length, t("High impact"), high.length ? "bad" : "ok")}${pfChip(list.filter(c => c.status === "approved").length, t("Applied"), "")}</div>`;
+  const empty = `<div class="empty"><div class="empty-icon">✎</div><h3>${t("No change requests")}</h3><p>${t("Approved tasks are locked. Propose a change from the Work plan — the impact is computed before you decide.")}</p></div>`;
+  return `${chips}<section class="card"><div class="card-body">${list.length ? `<div class="project-list">${cards}</div>` : empty}</div></section>`;
+}
+
+function proposeChangeModal(task) {
+  const opts = state.team.map(m => `<option value="${m.id}"${m.id === task.assignee_member_id ? " selected" : ""}>${esc(m.name)}</option>`).join("");
+  const dv = v => v ? esc(String(v).slice(0, 10)) : "";
+  return modalShell(t("Propose a change"), t("The task is approved — your edit becomes a tracked change request with a computed impact."),
+    "propose-change",
+    `<div class="form-grid">
+      <input type="hidden" name="task_id" value="${task.id}">
+      ${field(t("Title"), `<input name="title" minlength="5" maxlength="200" value="${esc(task.title)}">`)}
+      ${field(t("Estimate (h)"), `<input name="estimate_hours" type="number" step="0.5" min="0.5" max="500" value="${esc(String(task.estimate_hours))}">`)}
+      ${field(t("Start date"), `<input name="start" type="date" value="${dv(task.start)}">`)}
+      ${field(t("End date"), `<input name="end" type="date" value="${dv(task.end)}">`)}
+      ${field(t("Assignee"), `<select name="assignee_member_id"><option value="">${t("Not assigned")}</option>${opts}</select>`)}
+      ${field(t("Why this change *"), '<textarea name="reason" required minlength="5" maxlength="2000"></textarea>', true)}
+    </div>`, t("Propose with impact analysis"));
+}
+
 function scheduleView() {
   const d = state.schedule;
   const job = state.scheduleJob;
@@ -1302,8 +1414,20 @@ Object.assign(actions, {
     state.notice = { type: "ok", text: `Progress saved: ${pct}%.` };
     render();
   },
-  "export-pdf": async () => {
-    state.notice = { type: "ok", text: "Building the PDF report…" }; render();
+  "modal-change": t => {
+    const task = planTaskById(t.dataset.id);
+    if (!task) return;
+    state.modal = { type: "propose-change", task }; render();
+  },
+  "change-decide": async el => {
+    const status = el.dataset.status;
+    if (!confirm(status === "approved" ? "Approve and APPLY this change to the task?" : "Reject this change request? Nothing will change.")) return;
+    await post(`/projects/${state.project.id}/changes/${el.dataset.id}/decision`, { decision: status, comment: "" });
+    await reloadChanges(); await reloadSchedule();
+    state.notice = { type: "ok", text: status === "approved" ? "Change approved and applied." : "Change request rejected." };
+    render();
+  },
+  "export-pdf": async () => {    state.notice = { type: "ok", text: "Building the PDF report…" }; render();
     try {
       await downloadReport();
       state.notice = { type: "ok", text: "PDF report downloaded." }; render();

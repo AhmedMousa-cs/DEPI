@@ -90,17 +90,18 @@ def _gantt_flowable(rows, min_d, max_d, today, width=178 * mm):
             top = self.height
             for i, r in enumerate(rows):
                 y = top - (i + 1) * row_h
-                # label
+                # label (indented after the overdue marker when present)
                 c.setFillColor(C_INK)
                 c.setFont("Amiri", 7.5)
-                title = r["title"] if len(r["title"]) <= 52 else r["title"][:49] + "..."
-                c.drawString(0, y + 2.2 * mm, _fix(title))
+                title = r["title"] if len(r["title"]) <= 50 else r["title"][:47] + "..."
+                c.drawString(3 * mm if r["overdue"] else 0, y + 2.2 * mm, _fix(title))
                 # track
                 c.setFillColor(C_LINE)
                 c.roundRect(label_w, y + 0.8 * mm, track_w, 4.2 * mm, 2.1 * mm, stroke=0, fill=1)
-                # bar
-                x0 = self._x(r["start"])
-                x1 = self._x(r["end"] + timedelta(days=1))
+                # bar (clamped to the track — a task ending on the last day
+                # must not draw past the chart edge)
+                x0 = max(label_w, self._x(r["start"]))
+                x1 = min(label_w + track_w, self._x(r["end"] + timedelta(days=1)))
                 bw = max(2.5 * mm, x1 - x0)
                 color = C_GREEN if r["status"] == "done" else C_ORANGE if r["critical"] else C_BLUE
                 c.setFillColor(color)
@@ -109,10 +110,14 @@ def _gantt_flowable(rows, min_d, max_d, today, width=178 * mm):
                 if r["pct"] > 0:
                     c.setFillColor(colors.Color(1, 1, 1, alpha=0.42))
                     c.rect(x0 + 0.4 * mm, y + 1.6 * mm, max(0, bw - 0.8 * mm) * r["pct"] / 100, 1.2 * mm, stroke=0, fill=1)
-                # pct label after the bar
-                c.setFillColor(C_SOFT)
+                # pct label after the bar (inside it in white when there is no room)
                 c.setFont("Amiri", 6.5)
-                c.drawString(min(x1 + 1 * mm, width - 10 * mm), y + 2.2 * mm, f"{r['pct']}%")
+                if x1 + 11 * mm <= width:
+                    c.setFillColor(C_SOFT)
+                    c.drawString(x1 + 1 * mm, y + 2.2 * mm, f"{r['pct']}%")
+                else:
+                    c.setFillColor(colors.white)
+                    c.drawRightString(x1 - 1.2 * mm, y + 2.2 * mm, f"{r['pct']}%")
                 # overdue marker
                 if r["overdue"]:
                     c.setFillColor(C_RED)
@@ -214,8 +219,11 @@ def build_project_pdf(db: Session, project, user) -> bytes:
     # Tasks table
     story.append(Paragraph(_fix("Tasks"), ParagraphStyle(
         "h2b", fontName="Amiri", fontSize=12, leading=16, textColor=C_NAVY, spaceBefore=2 * mm)))
-    header = [_p("#", bold=True), _p("Title", bold=True), _p("Assignee", bold=True),
-              _p("Start", bold=True), _p("End", bold=True), _p("Status", bold=True), _p("%", bold=True), _p("CP", bold=True)]
+    header = [_p("#", color=colors.white, bold=True), _p("Title", color=colors.white, bold=True),
+              _p("Assignee", color=colors.white, bold=True),
+              _p("Start", color=colors.white, bold=True), _p("End", color=colors.white, bold=True),
+              _p("Status", color=colors.white, bold=True), _p("%", color=colors.white, bold=True),
+              _p("CP", color=colors.white, bold=True)]
     data = [header]
     for t in tasks:
         data.append([
@@ -226,9 +234,9 @@ def build_project_pdf(db: Session, project, user) -> bytes:
             _p(str(t.end or "—"), size=8),
             _p(t.review_status if t.review_status != "approved" else t.status, size=8),
             _p(str(100 if t.status == "done" else (t.progress_pct or 0)) if t.review_status == "approved" else "—", size=8),
-            _p("✓" if t.is_critical else "", size=8),
+            _p("yes" if t.is_critical else "", size=8),
         ])
-    tbl2 = Table(data, colWidths=[10 * mm, 62 * mm, 28 * mm, 19 * mm, 19 * mm, 22 * mm, 10 * mm, 8 * mm], repeatRows=1)
+    tbl2 = Table(data, colWidths=[10 * mm, 60 * mm, 28 * mm, 19 * mm, 19 * mm, 22 * mm, 10 * mm, 10 * mm], repeatRows=1)
     tbl2.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.4, C_LINE),
         ("BACKGROUND", (0, 0), (-1, 0), C_NAVY),
@@ -243,7 +251,8 @@ def build_project_pdf(db: Session, project, user) -> bytes:
     story.append(Paragraph(_fix("Risks"), ParagraphStyle(
         "h2c", fontName="Amiri", fontSize=12, leading=16, textColor=C_NAVY, spaceBefore=2 * mm)))
     if risks:
-        rdata = [[_p("Severity", bold=True), _p("Type", bold=True), _p("Finding", bold=True), _p("Suggested action", bold=True)]]
+        rdata = [[_p("Severity", color=colors.white, bold=True), _p("Type", color=colors.white, bold=True),
+                  _p("Finding", color=colors.white, bold=True), _p("Suggested action", color=colors.white, bold=True)]]
         for r in risks:
             rdata.append([_p(r["severity"], size=8), _p(r["type"], size=8),
                           _p(r["message"], size=8), _p(r["suggestion"], size=8)])

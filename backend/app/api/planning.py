@@ -23,7 +23,9 @@ from app.schemas.planning import (
     StoryOut,
     TaskDecision,
     TaskOut,
+    TaskProgressUpdate,
 )
+from app.services.delivery import DeliveryError, update_task_progress
 from app.services.planning import planning_coverage
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["planning"])
@@ -280,6 +282,26 @@ def get_task(
 ):
     get_project_or_404(db, project_id)
     return _task_out(db, _load_task(db, project_id, task_id))
+
+
+@router.patch("/tasks/{task_id}/progress", response_model=TaskOut)
+def patch_task_progress(
+    project_id: int,
+    task_id: int,
+    body: TaskProgressUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("PM")),
+):
+    """M9 delivery tracking: the PM records execution status on one approved task."""
+    get_project_or_404(db, project_id)
+    try:
+        task = update_task_progress(db, project_id=project_id, task_id=task_id,
+                                    status=body.status, progress_pct=body.progress_pct, pm=user)
+    except DeliveryError as e:
+        raise HTTPException(e.status_code, e.message)
+    db.commit()
+    db.refresh(task)
+    return _task_out(db, task)
 
 
 @router.post("/tasks/decision", response_model=list[TaskOut])

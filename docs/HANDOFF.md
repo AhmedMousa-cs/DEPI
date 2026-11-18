@@ -8,6 +8,16 @@ M6.1 (Agent 3 platform integration) is on branch feature/m6-agent3-integration (
 M4.1 (Agent 1 smart review: modules/priorities/questions/bulk/gaps) is on branch feature/agent1-smart-review (stacked on M6.1).
 M7 (PM command center: portfolio/resources/risks + assistant chat) is on branch feature/m7-pm-command-center (stacked on feature/agent1-smart-review).
 M8 (frontend polish: dark mode + Arabic/RTL + portfolio charts) is on branch feature/m8-polish (stacked on M7).
+M9 (delivery tracking + Gantt) is on branch feature/m9-gantt-delivery (stacked on feature/m8-polish).
+
+## M9 evidence (delivery tracking + Gantt)
+- [x] Backend: `PATCH /projects/{pid}/tasks/{tid}/progress` PM-only; `todo → 0%`, `done → 100%`, `in_progress` keeps/sets the percent; draft task 409, unknown 404, non-PM 403; audit `task.progress` with before/after — **6/6 new tests pass** (`tests/test_delivery_progress.py`); service `app/services/delivery.py`
+- [x] Full backend suite in the container: **459 passed** (453 baseline + 6 delivery tests)
+- [x] No migration needed: progress_pct/status/start/end already existed on tasks
+- [x] Gantt on the Schedule tab (no libraries): rows for approved+dated tasks over the project window; done → green, critical → orange, overdue → dashed red outline; red "today" marker; per-bar progress fill + % label; two-line row layout keeps it usable narrow and in RTL (direction-aware `margin-inline-start`/`inset-inline-*`)
+- [x] Per-row delivery controls (Todo / ▶ Start / Done + % input) call the PATCH and re-render; summary chips: hours-weighted overall %, done/total, in progress, overdue
+- [x] Verified live in the browser (project 14 "مدرسه", 11 dated approved tasks): Start → In progress 0%, % → 45% (chips: 5% overall), Done → 100% green (chips: 12% overall, 1/11); Arabic RTL Gantt fully translated ("مخطط جانت — تتبع التنفيذ", "مكتملة", dates "17 نوفمبر 2026"); dark mode colors follow the CSS variables; zero console errors
+- [x] Portfolio auto-sync with zero extra code: after the Done click the command-center card for "مدرسه" showed 12% · 1/11 tasks done; audit rows 341-343 show the full before/after chain (todo 0 → in_progress 45 → done 100)
 
 ## M8 evidence (frontend polish)
 - [x] `node --check` passes; verified in a real browser: both toggles persist across a reload (`nx-theme`, `nx-lang` in localStorage)

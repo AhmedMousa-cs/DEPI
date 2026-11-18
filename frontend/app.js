@@ -205,6 +205,11 @@ const AR = {
   "File": "ملف",
   "Confirm": "تأكيد",
   "OK": "حسنًا",
+  "Export PDF": "تصدير PDF",
+  "Building the PDF report…": "جارٍ إنشاء تقرير PDF…",
+  "PDF report downloaded.": "تم تنزيل تقرير PDF.",
+  "PDF export failed:": "فشل تصدير PDF:",
+  "Progress saved:": "تم حفظ التقدم:",
 };
 
 /* Regex rules for dynamic strings (numbers, dates) the exact map cannot cover. */
@@ -427,21 +432,21 @@ function portfolioView() {
 
 function projectView() {
   const p = state.project;
-  const tabs = [["overview", "Overview"], ["sources", "Sources (" + p.sources.length + ")"], ["team", "Team (" + state.team.length + ")"]];
+  const tabs = [["overview", "Overview"], ["sources", "Sources (" + (p.sources || []).length + ")"], ["team", "Team (" + state.team.length + ")"]];
   if (isPM()) tabs.push(["scope", "Scope review"], ["plan", "Work plan"], ["schedule", "Schedule"]);
   const later = ["Updates (M7)", "Decisions (M8)"];
-  return `<div class="workspace-head"><div class="workspace-title"><div class="project-monogram">${esc((p.name || "P")[0].toUpperCase())}</div><div><h1>${esc(p.name)}</h1><p>${esc(p.goal || "No goal added")}</p></div></div><div style="display:flex;gap:8px;align-items:center">${statusBadge(p.status)}${isPM() ? '<button class="btn btn-secondary btn-small" data-action="modal" data-modal="edit-project">Edit project</button>' : ""}</div></div><div class="tabs">${tabs.map(t => `<button class="${state.tab === t[0] ? "active" : ""}" data-action="tab" data-tab="${t[0]}">${esc(t[1])}</button>`).join("")}${later.map(l => `<button disabled style="opacity:.45;cursor:not-allowed" title="Not available yet">${esc(l)}</button>`).join("")}</div>${state.tab === "sources" ? sourcesView() : state.tab === "team" ? teamView() : state.tab === "scope" ? scopeView() : state.tab === "plan" ? planView() : state.tab === "schedule" ? scheduleView() : overviewView()}`;
+  return `<div class="workspace-head"><div class="workspace-title"><div class="project-monogram">${esc((p.name || "P")[0].toUpperCase())}</div><div><h1>${esc(p.name)}</h1><p>${esc(p.goal || "No goal added")}</p></div></div><div style="display:flex;gap:8px;align-items:center">${statusBadge(p.status)}${isPM() ? `<button class="btn btn-secondary btn-small" data-action="export-pdf">⬇ ${t("Export PDF")}</button><button class="btn btn-secondary btn-small" data-action="modal" data-modal="edit-project">${t("Edit project")}</button>` : ""}</div></div><div class="tabs">${tabs.map(t => `<button class="${state.tab === t[0] ? "active" : ""}" data-action="tab" data-tab="${t[0]}">${esc(t[1])}</button>`).join("")}${later.map(l => `<button disabled style="opacity:.45;cursor:not-allowed" title="Not available yet">${esc(l)}</button>`).join("")}</div>${state.tab === "sources" ? sourcesView() : state.tab === "team" ? teamView() : state.tab === "scope" ? scopeView() : state.tab === "plan" ? planView() : state.tab === "schedule" ? scheduleView() : overviewView()}`;
 }
 
 function overviewView() {
   const p = state.project, leader = state.team.find(m => m.is_leader);
   const hours = state.team.reduce((n, m) => n + Number(m.capacity_hours_per_week || 0), 0);
-  return `<div class="grid two-col"><section class="card section-card"><h2>Project snapshot</h2><p class="section-intro">Saved in PostgreSQL; survives a browser refresh.</p><div class="keyvals">${kv("Status", STATUS[p.status] || p.status)}${kv("Start", fmtDate(p.start_date))}${kv("Target end", fmtDate(p.end_date))}${kv("Team", state.team.length + " members · " + hours + " h/week")}${kv("Team Leader", leader ? leader.name + (leader.user_email ? " (" + leader.user_email + ")" : "") : "Not assigned")}${kv("Sources", String(p.sources.length))}</div></section><section class="card section-card"><h2>Project brief</h2><p class="section-intro">${esc(p.goal || "No goal added")}</p><div style="white-space:pre-wrap;font-size:13px">${esc(p.brief || "No brief")}</div></section></div><div class="callout">Next step: open <b>Scope review</b> to run extraction and approve the requirements — then plan with Agent 2 and schedule with Agent 3. Agents prepare drafts; you approve.</div>`;
+  return `<div class="grid two-col"><section class="card section-card"><h2>Project snapshot</h2><p class="section-intro">Saved in PostgreSQL; survives a browser refresh.</p><div class="keyvals">${kv("Status", STATUS[p.status] || p.status)}${kv("Start", fmtDate(p.start_date))}${kv("Target end", fmtDate(p.end_date))}${kv("Team", state.team.length + " members · " + hours + " h/week")}${kv("Team Leader", leader ? leader.name + (leader.user_email ? " (" + leader.user_email + ")" : "") : "Not assigned")}${kv("Sources", String((p.sources || []).length))}</div></section><section class="card section-card"><h2>Project brief</h2><p class="section-intro">${esc(p.goal || "No goal added")}</p><div style="white-space:pre-wrap;font-size:13px">${esc(p.brief || "No brief")}</div></section></div><div class="callout">Next step: open <b>Scope review</b> to run extraction and approve the requirements — then plan with Agent 2 and schedule with Agent 3. Agents prepare drafts; you approve.</div>`;
 }
 
 function sourcesView() {
   const p = state.project;
-  const rows = p.sources.map(s => `<div class="project-row"><div><div class="project-title">${esc(s.title)} <span class="badge blue">${esc(KIND[s.kind] || s.kind)}</span></div><div class="project-sub">${s.original_filename ? esc(s.original_filename) + " · " : ""}${fmtDateTime(s.created_at)} · ${esc(s.phase)}</div></div><button class="btn btn-secondary btn-small" data-action="view-source" data-id="${s.id}">View text</button></div>`).join("");
+  const rows = (p.sources || []).map(s => `<div class="project-row"><div><div class="project-title">${esc(s.title)} <span class="badge blue">${esc(KIND[s.kind] || s.kind)}</span></div><div class="project-sub">${s.original_filename ? esc(s.original_filename) + " · " : ""}${fmtDateTime(s.created_at)} · ${esc(s.phase)}</div></div><button class="btn btn-secondary btn-small" data-action="view-source" data-id="${s.id}">View text</button></div>`).join("");
   return `<div class="page-head"><div><div class="eyebrow">US01</div><h1>Sources</h1><p>Brief and transcripts. Only extracted text is stored (.txt, .md, .docx, .pdf up to 5 MB).</p></div>${isPM() ? '<button class="btn btn-primary" data-action="modal" data-modal="add-source">＋ Add source</button>' : ""}</div><section class="card"><div class="card-body"><div class="project-list">${rows}</div></div></section>`;
 }
 
@@ -699,8 +704,21 @@ function pollJob(id) {
   tick(); jobTimer = setInterval(tick, 3000);
 }
 
-async function waitForJob(id, timeoutMs = 300000) {
-  /** Await a job until it finishes; used by the accept-all chain (throws on failure). */
+/* M10: download the deterministic PDF report (fetch -> blob, token in header). */
+async function downloadReport() {
+  const res = await apiFetch(`/projects/${state.project.id}/report.pdf`); // raw Response (not JSON)
+  if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
+  const blob = await res.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `nexus-report-${state.project.id}-${new Date().toISOString().slice(0, 10)}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+}
+
+async function waitForJob(id, timeoutMs = 300000) {  /** Await a job until it finishes; used by the accept-all chain (throws on failure). */
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 2500));
@@ -1283,6 +1301,16 @@ Object.assign(actions, {
     await reloadSchedule();
     state.notice = { type: "ok", text: `Progress saved: ${pct}%.` };
     render();
+  },
+  "export-pdf": async () => {
+    state.notice = { type: "ok", text: "Building the PDF report…" }; render();
+    try {
+      await downloadReport();
+      state.notice = { type: "ok", text: "PDF report downloaded." }; render();
+    } catch (e) {
+      if (e.message === "unauthorized") throw e;
+      state.notice = { type: "bad", text: "PDF export failed: " + e.message }; render();
+    }
   },
 });
 

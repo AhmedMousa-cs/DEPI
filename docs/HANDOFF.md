@@ -9,6 +9,15 @@ M4.1 (Agent 1 smart review: modules/priorities/questions/bulk/gaps) is on branch
 M7 (PM command center: portfolio/resources/risks + assistant chat) is on branch feature/m7-pm-command-center (stacked on feature/agent1-smart-review).
 M8 (frontend polish: dark mode + Arabic/RTL + portfolio charts) is on branch feature/m8-polish (stacked on M7).
 M9 (delivery tracking + Gantt) is on branch feature/m9-gantt-delivery (stacked on feature/m8-polish).
+M10 (PDF export) is on branch feature/m10-pdf-export (stacked on feature/m9-gantt-delivery).
+
+## M10 evidence (PDF export)
+- [x] `GET /projects/{pid}/report.pdf` PM-only; reportlab + bundled Amiri (Regular+Bold, Latin+Arabic coverage verified via cmap); arabic_reshaper + python-bidi for shaping/order — no LLM anywhere
+- [x] 4 new tests (`tests/test_report_pdf.py`): real %PDF bytes + content-type + download filename + pypdf page/text checks ("Project status report", "Tasks"), Arabic project name doesn't break the PDF, TL 403, unknown project 404 — **4/4 pass**
+- [x] Full backend suite in the container: **463 passed** (459 + 4 report tests)
+- [x] Content mirrors the app: header + summary (health, hours-weighted progress, window, next deadline, task counts, pending drafts, overdue), drawn Gantt (same colors/logic as M9 UI, today line), full tasks table, project risks with suggested actions, governance footer
+- [x] Frontend "⬇ Export PDF" on the project header (PM only): fetch → blob → download (JWT in the header, so a plain link would not authenticate); verified live on project 14 (36.8KB, starts with %PDF-); Arabic notice strings included
+- [x] Small robustness fix found during verification: project header now guards `p.sources` before the reload completes
 
 ## M9 evidence (delivery tracking + Gantt)
 - [x] Backend: `PATCH /projects/{pid}/tasks/{tid}/progress` PM-only; `todo → 0%`, `done → 100%`, `in_progress` keeps/sets the percent; draft task 409, unknown 404, non-PM 403; audit `task.progress` with before/after — **6/6 new tests pass** (`tests/test_delivery_progress.py`); service `app/services/delivery.py`

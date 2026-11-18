@@ -135,6 +135,27 @@ def clean_business_data():
                 connection.execute(text(f"DELETE FROM {table} WHERE thread_id LIKE 'project:%:plan:%'"))
 
 
+@pytest.fixture(autouse=True)
+def fake_gap_llm(monkeypatch):
+    """The automatic post-extraction coverage analysis never talks to the real LLM in tests.
+
+    A test that asserts on the gap analysis patches run_structured itself; its patch
+    simply overrides this one (monkeypatch applies after autouse fixtures).
+    """
+    from app.llm.runner import StructuredRun
+    from app.schemas.extraction import GapAnalysisOutput
+
+    parsed = GapAnalysisOutput(assessments=[
+        {"area": "Invented area", "covered": False, "matched_ids": [], "note": ""},
+    ])
+
+    def fake(**kwargs):
+        return StructuredRun(parsed=parsed, run_id=None, usage=None, cost_usd=0,
+                             pricing_configured=False, attempts=1, trace_id=None)
+
+    monkeypatch.setattr("app.services.coverage_gaps.run_structured", fake)
+
+
 @pytest.fixture
 def db_session():
     """

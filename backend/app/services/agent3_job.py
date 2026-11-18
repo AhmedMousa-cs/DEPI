@@ -1,10 +1,15 @@
-"""Job handler: Agent 3 builds a DRAFT plan version from the approved tasks, then queues Agent 4.
+"""Job handler: Agent 3 schedules the project (CPM + optional LLM) and snapshots the plan.
 
-Writes drafts only (plan_versions.status='draft'). Tasks are not touched: the schedule reaches the
-tasks table only when the PM approves the plan (app/orchestrator/plan_gate.py).
+Hybrid flow (integration of the M6.1 schedule-draft flow with the m6-B plan-approval chain):
+the same Agent3Output is persisted as BOTH artifacts —
+  1. a ``schedule_draft`` (M6.1): the Schedule tab approves it and writes the task dates;
+  2. a draft ``plan_version`` (m6-B): feeds the Agent 4 review and the plan approval gate.
+Tasks are never touched by the agent: dates reach the tasks table only through a PM
+approval (services/scheduling.py for drafts, orchestrator/plan_gate.py for plan versions).
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date
 
@@ -13,14 +18,17 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.agents import agent3_schedule
+from app.agents.agent3_schedule import PROMPT_VERSION, run_agent3
 from app.audit import write_audit
 from app.config import settings
 from app.db.models import Job
 from app.db.session import SessionLocal
+from app.llm.runner import StructuredRun, run_structured
 from app.schemas.plan import TaskOverride
 from app.schemas.scheduling import TaskInput, TeamMemberInput
 from app.services.jobs import JobContext, PermanentJobError, register
 from app.services.plan_versions import build_snapshot, create_draft_version, load_plan_inputs
+from app.services.scheduling import save_schedule_draft
 
 log = logging.getLogger("nexus.agent3_job")
 PLANNABLE_STATUSES = ("planning", "plan_review", "active")
@@ -31,6 +39,36 @@ def llm_available() -> bool:
     p = (settings.llm_provider or "").lower()
     return bool(settings.groq_api_key) if p == "groq" else bool(settings.anthropic_api_key) if p == "anthropic" \
         else p == "ollama"
+
+
+class BudgetedLLM:
+    """Agent 3's StructuredLLM protocol, backed by run_structured (one agent_run per call).
+
+    The runner handles the budget reserve, agent_runs, audit and Langfuse tracing; without a
+    configured provider it raises and Agent 3 degrades to its deterministic template.
+    """
+
+    def __init__(self, project_id: int, job_id: int):
+        self.project_id = project_id
+        self.job_id = job_id
+        self.run_ids: list[int] = []
+
+    def __call__(self, *, system_prompt: str, payload: dict, schema):
+        messages = [
+            {"role": "system", "content": system_prompt},
+            # payload is untrusted data; the prompt says so explicitly
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=False, default=str)},
+        ]
+        run: StructuredRun = run_structured(
+            project_id=self.project_id,
+            job_id=self.job_id,
+            agent="agent3_schedule",
+            prompt_version=PROMPT_VERSION,
+            messages=messages,
+            schema=schema,
+        )
+        self.run_ids.append(run.run_id)
+        return run.parsed
 
 
 def _parse_overrides(raw, task_ids: set[int], member_ids: set[int]) -> list[dict]:
@@ -84,11 +122,11 @@ def run_agent3_schedule(ctx: JobContext, params: dict) -> str:
     members = [TeamMemberInput(id=m["id"], name=m["name"], capacity_hours_per_week=m["capacity_hours_per_week"],
                                available_from=m["available_from"], available_to=m["available_to"])
                for m in inputs.members]
-    llm = None
-    if llm_available():
-        from app.agents.agent3_llm import make_runner_llm
-
-        llm = make_runner_llm(project_id=project_id, job_id=ctx.job_id)
+    # Every LLM call goes through run_structured (budget, agent_runs, audit, Langfuse). Agent 2
+    # always fills estimate_hours, so the estimator stays silent in the normal flow; the adapter
+    # is only used for missing estimates and the explanation wording (degrades to the
+    # deterministic template on any failure).
+    llm = BudgetedLLM(project_id, ctx.job_id)
     try:
         output = agent3_schedule.run_agent3(tasks, members, start, llm=llm)
     except agent3_schedule.SchedulingError as exc:
@@ -96,12 +134,43 @@ def run_agent3_schedule(ctx: JobContext, params: dict) -> str:
     ctx.heartbeat(progress=70)
 
     snapshot = build_snapshot(inputs=inputs, output=output, overrides=overrides)
-    with SessionLocal() as db:
+    with SessionLocal() as db:  # one transaction: schedule draft + plan version + audits
+        draft = save_schedule_draft(
+            db,
+            project_id=project_id,
+            payload=output.model_dump(mode="json"),
+            project_start=output.schedule.project_start,
+            project_end=output.schedule.project_end,
+            total_duration_days=output.schedule.total_duration_days,
+            conflicts_count=len(output.conflicts),
+            run_ids=llm.run_ids,
+        )
+        write_audit(
+            db,
+            ACTOR,
+            "agent3.scheduling_completed",
+            "project",
+            project_id,
+            after={
+                "job_id": ctx.job_id,
+                "draft_id": draft.id,
+                "run_ids": llm.run_ids,
+                "tasks_scheduled": len(output.schedule.tasks),
+                "project_start": output.schedule.project_start.isoformat(),
+                "project_end": output.schedule.project_end.isoformat(),
+                "total_duration_days": output.schedule.total_duration_days,
+                "critical_path": list(output.schedule.critical_path),
+                "conflicts": len(output.conflicts),
+                "overloaded_members": [m.member_id for m in output.capacity.members if m.is_overloaded],
+                "llm_estimated_tasks": [e.task_id for e in output.estimates if e.source == "llm"],
+                "explanation_source": output.explanation.source,
+            },
+        )
         pv = create_draft_version(db, project_id=project_id, snapshot=snapshot, created_by=ACTOR)
         write_audit(db, ACTOR, "agent3.schedule_completed", "project", project_id,
                     after={"job_id": ctx.job_id, "version": pv.version, "tasks": len(snapshot["tasks"]),
                            "conflicts": len(snapshot["conflicts"]), "overrides": len(overrides),
-                           "project_end": snapshot["schedule"]["project_end"]})
+                           "project_end": snapshot["schedule"]["project_end"], "draft_id": draft.id})
         version = pv.version
         db.commit()
 
@@ -113,4 +182,4 @@ def run_agent3_schedule(ctx: JobContext, params: dict) -> str:
     except IntegrityError:
         log.info("agent4.review already active for project %s", project_id)
     ctx.heartbeat(progress=100)
-    return f"version:{version};tasks:{len(snapshot['tasks'])};conflicts:{len(snapshot['conflicts'])}"[:255]
+    return f"version:{version};tasks:{len(snapshot['tasks'])};draft:{draft.id};conflicts:{len(snapshot['conflicts'])}"[:255]

@@ -39,7 +39,7 @@ def estimate_input_tokens(messages: list[dict]) -> int:
     return max(1, math.ceil(sum(len(str(m.get("content", ""))) for m in messages) / 2))
 
 
-def run_structured(*, project_id: int, job_id: int | None, agent: str, prompt_version: str, messages: list[dict],
+def run_structured(*, project_id: int | None, job_id: int | None, agent: str, prompt_version: str, messages: list[dict],
                    schema: type[BaseModel], user_role: str = "system", max_attempts: int | None = None,
                    model_factory: Callable[[], Any] = get_llm_model, call: Callable[..., Any] = structured_call,
                    tracer: Tracer | None = None) -> StructuredRun:
@@ -56,9 +56,10 @@ def run_structured(*, project_id: int, job_id: int | None, agent: str, prompt_ve
                                     reserve_tokens=reserve_tokens, reserve_cost=reserve_cost)
     tracer = tracer or get_tracer()
     started = time.monotonic()
+    session_id = project_id if project_id is not None else "portfolio"
     meta = {"project_id": project_id, "job_id": job_id, "agent": agent, "user_role": user_role,
             "prompt_version": prompt_version, "model": model_name}
-    with tracer.generation(name=agent, model=model_name, metadata=meta, session_id=project_id) as gen:
+    with tracer.generation(name=agent, model=model_name, metadata=meta, session_id=session_id) as gen:
         try:
             result = call(model=model_factory(), messages=messages, schema=schema, max_attempts=limit,
                           max_tokens=settings.llm_max_output_tokens)

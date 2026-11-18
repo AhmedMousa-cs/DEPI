@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from sqlalchemy import select
 
 from app.agents import agent2_plan
-from app.db.models import Project, Requirement, Task, UserStory
+from app.db.models import Project, Requirement, Source, Task, UserStory
 from app.db.session import SessionLocal
 from app.schemas.planning import PlanningOutput
 from app.services.jobs import process_one
@@ -18,6 +18,7 @@ PLAN = PlanningOutput(
             "text": "As a patient I can book an appointment online",
             "acceptance_criteria": ["Booking finishes in two taps."],
             "confidence": 0.9,
+            "order": 1,
         }
     ],
     tasks=[
@@ -28,6 +29,9 @@ PLAN = PlanningOutput(
             "estimate_hours": 8,
             "depends_on": [],
             "confidence": 0.8,
+            "order": 1,
+            "is_critical": True,
+            "rationale": "Unblocks the booking UI and every reminder that follows.",
         },
         {
             "ref": "T2",
@@ -36,15 +40,18 @@ PLAN = PlanningOutput(
             "estimate_hours": 4,
             "depends_on": ["T1"],
             "confidence": 0.8,
+            "order": 2,
+            "is_critical": False,
+            "rationale": "Proves the flow a patient actually goes through.",
         },
     ],
 )
 
 
-def fake_plan():
+def fake_plan(soft_issues: list[str] | None = None):
     """Return a generate_plan replacement bound to the first approved requirement."""
 
-    def fake(*, project_id, requirements, job_id=None):
+    def fake(*, project_id, requirements, context=None, job_id=None):
         rid = requirements[0]["id"]
         stories = [
             {**s.model_dump(), "requirement_id": rid} for s in PLAN.stories
@@ -52,6 +59,7 @@ def fake_plan():
         return SimpleNamespace(
             parsed=PlanningOutput(stories=stories, tasks=[t.model_dump() for t in PLAN.tasks]),
             run_id=None,
+            soft_issues=list(soft_issues or []),
         )
 
     return fake
@@ -104,15 +112,20 @@ def test_job_saves_draft_stories_tasks_and_dependencies(monkeypatch):
     tasks = client.get(f"/projects/{pid}/tasks", headers=pm).json()
     assert len(stories) == 1 and stories[0]["review_status"] == "draft"
     assert stories[0]["locked_by_pm"] is False
+    assert stories[0]["plan_order"] == 1
     assert len(tasks) == 2 and all(t["review_status"] == "draft" and t["status"] == "todo" for t in tasks)
     second = next(t for t in tasks if t["title"] == "Test the booking flow")
     first = next(t for t in tasks if t["title"] == "Build the booking form")
     assert second["depends_on"] == [first["id"]]
+    assert [first["plan_order"], second["plan_order"]] == [1, 2]
+    assert first["is_critical"] is True and second["is_critical"] is False
+    assert "Unblocks the booking UI" in first["rationale"]
 
     after = audit_rows("agent2.planning_completed")[0].after
     assert after["approved_requirements"] == 1
     assert after["stories_drafted"] == 1 and after["tasks_drafted"] == 2
     assert after["dependencies_created"] == 1
+    assert after["plan_soft_issues"] == []
 
 
 def test_job_refuses_before_the_scope_is_approved(monkeypatch):
@@ -136,6 +149,45 @@ def test_job_refuses_without_approved_requirements(monkeypatch):
     assert job["status"] == "failed"
     assert "No approved requirements" in job["error"]
     assert client.get(f"/projects/{pid}/stories", headers=pm).json() == []
+
+
+def test_job_passes_project_context_to_the_agent(monkeypatch):
+    captured: dict = {}
+
+    def fake(*, project_id, requirements, context=None, job_id=None):
+        captured["requirements"] = requirements
+        captured["context"] = context
+        return fake_plan()(project_id=project_id, requirements=requirements, context=context, job_id=job_id)
+
+    monkeypatch.setattr(agent2_plan, "generate_plan", fake)
+    pm = pm_headers()
+    pid = make_project(pm)["id"]
+    req = seed_approved(pid)[0]
+    with SessionLocal() as s:
+        brief = s.scalar(select(Source).where(Source.project_id == pid, Source.kind == "brief"))
+        brief.content_text = "GreenCart sells groceries online."
+        s.add(Source(project_id=pid, kind="transcript", title="transcript", content_text="PM: we start with one city."))
+        s.get(Requirement, req).pm_comment = "Keep the first release to a single city."
+        s.commit()
+    set_status(pid, "planning")
+    assert run_job(pm, pid)["status"] == "done"
+
+    context = captured["context"]
+    assert "GreenCart" in context.brief and "one city" in context.transcript
+    assert any("single city" in d for d in context.pm_decisions)
+    assert captured["requirements"][0]["pm_comment"] == "Keep the first release to a single city."
+
+
+def test_soft_issues_surviving_self_correction_are_recorded_for_the_pm(monkeypatch):
+    issue = "no task is marked is_critical: mark the tasks that block the first release"
+    monkeypatch.setattr(agent2_plan, "generate_plan", fake_plan(soft_issues=[issue]))
+    pm = pm_headers()
+    pid = make_project(pm)["id"]
+    seed_approved(pid)
+    set_status(pid, "planning")
+    assert run_job(pm, pid)["status"] == "done"
+    after = audit_rows("agent2.planning_completed")[0].after
+    assert after["plan_soft_issues"] == [issue]
 
 
 def test_plan_review_status_is_plannable(monkeypatch):

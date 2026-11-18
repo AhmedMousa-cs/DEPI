@@ -27,6 +27,14 @@ def load_golden(name: str) -> dict:
     return json.loads((GOLDEN / f"{name}-expected.json").read_text(encoding="utf-8"))
 
 
+def golden_context(expected: dict):
+    """The brief/transcript files as Agent 2 would receive them from the database."""
+    from app.agents.agent2_plan import PlanningContext
+
+    kinds = {s["kind"]: (GOLDEN / s["file"]).read_text(encoding="utf-8") for s in expected["sources"]}
+    return PlanningContext(brief=kinds.get("brief"), transcript=kinds.get("transcript"))
+
+
 def approved_requirements(expected: dict) -> list[dict]:
     """The requirement shape Agent 2 receives: approved rows only, id/type/priority/text."""
     return [
@@ -45,9 +53,10 @@ def generate_plan(expected: dict, max_attempts: int | None = None) -> tuple[dict
     from app.llm.usage import TokenUsage, UsageUnavailable, extract_usage, unwrap_parsed
     from app.schemas.planning import PlanningOutput
 
+    requirements = approved_requirements(expected)
     result = structured_call(
         model=get_llm_model(),
-        messages=build_messages(approved_requirements(expected)),
+        messages=build_messages(requirements, golden_context(expected)),
         schema=PlanningOutput,
         max_attempts=max_attempts or settings.llm_max_attempts,
         max_tokens=settings.llm_max_output_tokens,

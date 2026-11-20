@@ -21,8 +21,16 @@ from test_agent2_job import fake_plan, seed_approved, set_status
 def run_job(pm, pid, job_type):
     r = client.post(f"/projects/{pid}/jobs", json={"type": job_type}, headers=pm)
     assert r.status_code == 202, r.text
-    assert process_one() is True
-    return client.get(f"/jobs/{r.json()['id']}", headers=pm).json()
+    jid = r.json()["id"]
+    # the hybrid agent3 flow auto-queues an agent4.review job, which may take the
+    # next process_one slot — keep processing until THIS job leaves the queue
+    from app.db.models import Job
+    while True:
+        with SessionLocal() as s:
+            if s.get(Job, jid).status not in ("queued", "running"):
+                break
+        assert process_one() is True, "queue drained while the job is still queued"
+    return client.get(f"/jobs/{jid}", headers=pm).json()
 
 
 def fake_explanation_run():
@@ -80,7 +88,7 @@ def test_schedule_job_creates_a_draft_and_touches_no_task_dates(monkeypatch):
 
     job, resp = schedule(monkeypatch, pm, pid)
     assert job["status"] == "done", job
-    assert job["result_ref"].startswith("draft:")
+    assert job["result_ref"].count("draft:") == 1
     assert resp.status_code == 200
     draft = resp.json()
     assert draft["review_status"] == "draft" and draft["conflicts_count"] == 0
@@ -155,13 +163,15 @@ def test_approval_never_dates_draft_or_rejected_tasks(monkeypatch):
     pm = pm_headers()
     pid = make_project(pm)["id"]
     tasks = plan_tasks(monkeypatch, pm, pid)
-    # one task approved, one rejected: only the approved one may receive dates
-    r = client.post(f"/projects/{pid}/tasks/{tasks['Test the booking flow']['id']}/decision", json={"decision": "approved"}, headers=pm)
+    # one task approved, one rejected: only the approved one may receive dates.
+    # The approved one must be the dependency-free task — the plan refuses to be
+    # built from approved tasks that depend on unapproved work.
+    r = client.post(f"/projects/{pid}/tasks/{tasks['Build the booking form']['id']}/decision", json={"decision": "approved"}, headers=pm)
     assert r.status_code == 200
-    r = client.post(f"/projects/{pid}/tasks/{tasks['Build the booking form']['id']}/decision", json={"decision": "rejected", "comment": "out of scope"}, headers=pm)
+    r = client.post(f"/projects/{pid}/tasks/{tasks['Test the booking flow']['id']}/decision", json={"decision": "rejected", "comment": "out of scope"}, headers=pm)
     assert r.status_code == 200
-    approved_task = tasks["Test the booking flow"]
-    rejected_task = tasks["Build the booking form"]
+    approved_task = tasks["Build the booking form"]
+    rejected_task = tasks["Test the booking flow"]
 
     job, resp = schedule(monkeypatch, pm, pid)
     assert job["status"] == "done" and resp.status_code == 200
@@ -207,7 +217,7 @@ def test_job_refuses_when_the_plan_is_not_approved(monkeypatch):
     pid = make_project(pm)["id"]
     plan_tasks(monkeypatch, pm, pid)  # tasks exist but none is PM-approved
     job, resp = schedule(monkeypatch, pm, pid, status="planning")
-    assert job["status"] == "failed" and "approve the plan tasks" in job["error"]
+    assert job["status"] == "failed" and "approve the tasks" in job["error"]
     assert resp.status_code == 404 and "No schedule yet" in resp.json()["detail"]
 
 
@@ -215,11 +225,11 @@ def test_job_refuses_in_early_statuses_and_without_tasks(monkeypatch):
     pm = pm_headers()
     pid = make_project(pm)["id"]
     job, _ = schedule(monkeypatch, pm, pid, status="setup")
-    assert job["status"] == "failed" and "cannot schedule" in job["error"]
+    assert job["status"] == "failed" and "can't be built" in job["error"]
 
     pid2 = make_project(pm)["id"]
     job2, _ = schedule(monkeypatch, pm, pid2, status="active")
-    assert job2["status"] == "failed" and "No tasks to schedule" in job2["error"]
+    assert job2["status"] == "failed" and "No approved tasks" in job2["error"]
 
 
 def test_new_draft_supersedes_the_previous_one(monkeypatch):

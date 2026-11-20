@@ -10,7 +10,15 @@ M7 (PM command center: portfolio/resources/risks + assistant chat) is on branch 
 M8 (frontend polish: dark mode + Arabic/RTL + portfolio charts) is on branch feature/m8-polish (stacked on M7).
 M9 (delivery tracking + Gantt) is on branch feature/m9-gantt-delivery (stacked on feature/m8-polish).
 M10 (PDF export) is on branch feature/m10-pdf-export (stacked on feature/m9-gantt-delivery).
-M11 (change management) is on branch feature/m11-change-management (stacked on feature/m10-pdf-export).
+M11 (change management) is on branch feature/m11-change-management (stacked on feature/m10-pdf-export); merged to main via PR #53 together with #52 (M9+M10).
+M6-B (plan approval gate + Agent 4: plan_versions/risks, LangGraph review, PM-only gate) arrives on branch feature/m6-agent4-approval-gate (teammate Mahmoud, PR #47) integrated with M6.1 as a hybrid Agent 3 job.
+
+## M6-B evidence (plan approval gate + Agent 4)
+- [x] Merged main (M4.1/M6.1/M7/M8/M9/M10/M11) into `feature/m6-agent4-approval-gate`; conflicts resolved in models.py (PlanVersion+Risk kept alongside CoverageReport+ScheduleDraft), main.py (plan+scheduling routers), job_handlers.py (agent4_job), requirements.txt (langchain + reportlab union), decisions.md (teammate ADR renumbered 011 -> 018 -> **ADR-021**, M9 keeps ADR-018)
+- [x] Hybrid Agent 3 contract: one `agent3.schedule` job persists BOTH the M6.1 `schedule_draft` (PM approval writes dates, unchanged) and a draft `plan_version` (feeds Agent 4 + plan gate), then queues `agent4.review`; agents still never write task rows
+- [x] plan_versions/risks migration `9d4e6a8c1b25` re-chained on the single head (`d9e4f7b2c5a3` after M11 merged) - `alembic heads` = one head
+- [x] Full backend suite in the container on the merged branch: **577 passed** (previous 469 + 18 Agent 4 job tests + M9/M10/M11 suites); single-run policy respected
+- [ ] Frontend: Plan review UI for Agent 4 / the approval gate (not yet wired)
 
 ## M11 evidence (change management)
 - [x] New table `change_requests` (migration `d9e4f7b2c5a3`, chained on the single head `a7c3e1d9f2b8`; applied to the dev DB, `alembic current` = d9e4f7b2c5a3): field-level payload diff (before/after, only fields that actually change), stored deterministic impact, reason, status draft|approved|rejected

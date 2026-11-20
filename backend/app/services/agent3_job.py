@@ -1,35 +1,52 @@
-"""Agent 3 job: schedule the project's tasks (deterministic CPM + optional LLM estimates/words).
+"""Job handler: Agent 3 schedules the project (CPM + optional LLM) and snapshots the plan.
 
-Draft-only rule: the agent computes and saves a schedule_draft row. tasks.start / tasks.end are
-written only when the PM approves the draft (see services/scheduling.py).
-
-Every LLM call goes through run_structured (budget reserve, agent_runs, audit, Langfuse), so Agent 3
-obeys the same platform rules as Agents 1 and 2 (ADR-006 / ADR-007).
+Hybrid flow (integration of the M6.1 schedule-draft flow with the m6-B plan-approval chain):
+the same Agent3Output is persisted as BOTH artifacts —
+  1. a ``schedule_draft`` (M6.1): the Schedule tab approves it and writes the task dates;
+  2. a draft ``plan_version`` (m6-B): feeds the Agent 4 review and the plan approval gate.
+Tasks are never touched by the agent: dates reach the tasks table only through a PM
+approval (services/scheduling.py for drafts, orchestrator/plan_gate.py for plan versions).
 """
+from __future__ import annotations
+
 import json
 import logging
 from datetime import date
 
+from pydantic import ValidationError
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
-from app.agents.agent3_schedule import Agent3Output, PROMPT_VERSION, run_agent3
+from app.agents import agent3_schedule
+from app.agents.agent3_schedule import PROMPT_VERSION, run_agent3
 from app.audit import write_audit
-from app.db.models import Job, Project, Task, TaskDependency, TeamMember
+from app.config import settings
+from app.db.models import Job
 from app.db.session import SessionLocal
 from app.llm.runner import StructuredRun, run_structured
+from app.schemas.plan import TaskOverride
 from app.schemas.scheduling import TaskInput, TeamMemberInput
 from app.services.jobs import JobContext, PermanentJobError, register
+from app.services.plan_versions import build_snapshot, create_draft_version, load_plan_inputs
 from app.services.scheduling import save_schedule_draft
 
 log = logging.getLogger("nexus.agent3_job")
+PLANNABLE_STATUSES = ("planning", "plan_review", "active")
+ACTOR = "agent:agent3_schedule"
 
-# The plan stage is live (Agent 2 has run). The real "plan reviewed" gate is enforced below:
-# at least one task must be PM-approved before a schedule is computed.
-SCHEDULABLE_STATUSES = ("planning", "plan_review", "active")
+
+def llm_available() -> bool:
+    p = (settings.llm_provider or "").lower()
+    return bool(settings.groq_api_key) if p == "groq" else bool(settings.anthropic_api_key) if p == "anthropic" \
+        else p == "ollama"
 
 
 class BudgetedLLM:
-    """Agent 3's StructuredLLM protocol, backed by run_structured (one agent_run per call)."""
+    """Agent 3's StructuredLLM protocol, backed by run_structured (one agent_run per call).
+
+    The runner handles the budget reserve, agent_runs, audit and Langfuse tracing; without a
+    configured provider it raises and Agent 3 degrades to its deterministic template.
+    """
 
     def __init__(self, project_id: int, job_id: int):
         self.project_id = project_id
@@ -54,99 +71,83 @@ class BudgetedLLM:
         return run.parsed
 
 
-def _load(job_id: int) -> tuple[int, str, list[Task], list[TeamMember]]:
-    with SessionLocal() as db:
-        job = db.get(Job, job_id)
-        if job is None:
-            raise PermanentJobError("job not found")
-        project = db.scalar(select(Project).where(Project.id == job.project_id))
-        if project is None:
-            raise PermanentJobError("project not found")
-        tasks = list(db.scalars(select(Task).where(Task.project_id == project.id).order_by(Task.id)))
-        members = list(
-            db.scalars(select(TeamMember).where(TeamMember.project_id == project.id).order_by(TeamMember.id))
-        )
-        return project.id, project.status, tasks, members
-
-
-def _task_inputs(db, tasks: list[Task]) -> list[TaskInput]:
-    """Agent 3 input shape: str ids, dependencies from task_dependencies, estimates in hours."""
-    deps: dict[int, list[int]] = {}
-    if tasks:
-        rows = db.scalars(
-            select(TaskDependency).where(TaskDependency.task_id.in_([t.id for t in tasks]))
-        ).all()
-        for row in rows:
-            deps.setdefault(row.task_id, []).append(row.depends_on_task_id)
-    return [
-        TaskInput(
-            id=str(t.id),
-            title=t.title,
-            estimate_hours=float(t.estimate_hours),
-            assignee_id=str(t.assignee_member_id) if t.assignee_member_id else None,
-            depends_on=tuple(str(d) for d in sorted(deps.get(t.id, []))),
-        )
-        for t in tasks
-    ]
-
-
-def _member_inputs(members: list[TeamMember]) -> list[TeamMemberInput]:
-    return [
-        TeamMemberInput(
-            id=str(m.id),
-            name=m.name,
-            capacity_hours_per_week=float(m.capacity_hours_per_week),
-            available_from=m.available_from,
-            available_to=m.available_to,
-        )
-        for m in members
-    ]
+def _parse_overrides(raw, task_ids: set[int], member_ids: set[int]) -> list[dict]:
+    out: list[dict] = []
+    seen: set[int] = set()
+    for item in raw or []:
+        try:
+            o = TaskOverride.model_validate(item)
+        except ValidationError as exc:
+            raise PermanentJobError(f"invalid override: {exc.errors()[0]['msg']}") from None
+        if o.task_id not in task_ids:
+            raise PermanentJobError(f"override refers to task {o.task_id}, which is not an approved task of this project")
+        if o.assignee_member_id is not None and o.assignee_member_id not in member_ids:
+            raise PermanentJobError(f"override refers to member {o.assignee_member_id}, who is not in this project's team")
+        if o.task_id in seen:
+            raise PermanentJobError(f"two overrides for task {o.task_id}")
+        seen.add(o.task_id)
+        out.append(o.model_dump(exclude_none=True))
+    return out
 
 
 @register("agent3.schedule")
 def run_agent3_schedule(ctx: JobContext, params: dict) -> str:
-    project_id, status, tasks, members = _load(ctx.job_id)
-    if status not in SCHEDULABLE_STATUSES:
+    with SessionLocal() as db:
+        job = db.get(Job, ctx.job_id)
+        if job is None:
+            raise PermanentJobError("job not found")
+        project_id = job.project_id
+        inputs = load_plan_inputs(db, project_id)
+    if inputs.project["status"] not in PLANNABLE_STATUSES:
         raise PermanentJobError(
-            f"Agent 3 cannot schedule while the project is '{status}'."
-        )
-    if not tasks:
-        raise PermanentJobError("No tasks to schedule: run Agent 2 first.")
-    if not any(t.review_status == "approved" for t in tasks):
-        raise PermanentJobError(
-            "The work plan is not approved yet: approve the plan tasks, then run scheduling."
-        )
+            f"A plan can't be built while the project is '{inputs.project['status']}'; approve the scope first.")
+    if not inputs.tasks:
+        raise PermanentJobError("No approved tasks: approve the tasks (Agent 2) before building the plan.")
+    if inputs.dangling:
+        raise PermanentJobError(f"Approved tasks depend on tasks that are not approved: {inputs.dangling[:5]}")
     ctx.heartbeat(progress=10)
 
-    with SessionLocal() as db:
-        task_inputs = _task_inputs(db, tasks)
-    # Every LLM call goes through run_structured. Agent 2 always fills estimate_hours, so the
-    # estimator stays silent in the normal flow; the adapter is only used for missing estimates
-    # and for the explanation wording (degrades to the deterministic template on any failure).
-    llm = BudgetedLLM(project_id, ctx.job_id)
-    out: Agent3Output = run_agent3(
-        task_inputs,
-        _member_inputs(members),
-        date.today(),
-        llm=llm,
-        save_draft=None,  # persistence happens below, in one transaction with the audit row
-    )
-    ctx.heartbeat(progress=80)
+    overrides = _parse_overrides(params.get("overrides"), {t["id"] for t in inputs.tasks},
+                                 {m["id"] for m in inputs.members})
+    by_task = {o["task_id"]: o for o in overrides}
+    start_raw = params.get("start_date") or inputs.project["start_date"]
+    start = date.fromisoformat(start_raw) if start_raw else date.today()
 
-    with SessionLocal() as db:  # one transaction: draft + audit
+    tasks = []
+    for t in inputs.tasks:
+        o = by_task.get(t["id"], {})
+        tasks.append(TaskInput(
+            id=t["id"], title=t["title"], estimate_hours=t["estimate_hours"], duration_days=o.get("duration_days"),
+            assignee_id=o.get("assignee_member_id", t["assignee_member_id"]), depends_on=inputs.deps[t["id"]]))
+    members = [TeamMemberInput(id=m["id"], name=m["name"], capacity_hours_per_week=m["capacity_hours_per_week"],
+                               available_from=m["available_from"], available_to=m["available_to"])
+               for m in inputs.members]
+    # Every LLM call goes through run_structured (budget, agent_runs, audit, Langfuse). Agent 2
+    # always fills estimate_hours, so the estimator stays silent in the normal flow; the adapter
+    # is only used for missing estimates and the explanation wording (degrades to the
+    # deterministic template on any failure).
+    llm = BudgetedLLM(project_id, ctx.job_id)
+    try:
+        output = agent3_schedule.run_agent3(tasks, members, start, llm=llm)
+    except agent3_schedule.SchedulingError as exc:
+        raise PermanentJobError(str(exc)) from None
+    ctx.heartbeat(progress=70)
+
+    snapshot = build_snapshot(inputs=inputs, output=output, overrides=overrides)
+    with SessionLocal() as db:  # one transaction: schedule draft + plan version + audits
         draft = save_schedule_draft(
             db,
             project_id=project_id,
-            payload=out.model_dump(mode="json"),
-            project_start=out.schedule.project_start,
-            project_end=out.schedule.project_end,
-            total_duration_days=out.schedule.total_duration_days,
-            conflicts_count=len(out.conflicts),
+            payload=output.model_dump(mode="json"),
+            project_start=output.schedule.project_start,
+            project_end=output.schedule.project_end,
+            total_duration_days=output.schedule.total_duration_days,
+            conflicts_count=len(output.conflicts),
             run_ids=llm.run_ids,
         )
         write_audit(
             db,
-            "agent:agent3_schedule",
+            ACTOR,
             "agent3.scheduling_completed",
             "project",
             project_id,
@@ -154,21 +155,31 @@ def run_agent3_schedule(ctx: JobContext, params: dict) -> str:
                 "job_id": ctx.job_id,
                 "draft_id": draft.id,
                 "run_ids": llm.run_ids,
-                "tasks_scheduled": len(out.schedule.tasks),
-                "project_start": out.schedule.project_start.isoformat(),
-                "project_end": out.schedule.project_end.isoformat(),
-                "total_duration_days": out.schedule.total_duration_days,
-                "critical_path": list(out.schedule.critical_path),
-                "conflicts": len(out.conflicts),
-                "overloaded_members": [m.member_id for m in out.capacity.members if m.is_overloaded],
-                "llm_estimated_tasks": [e.task_id for e in out.estimates if e.source == "llm"],
-                "explanation_source": out.explanation.source,
+                "tasks_scheduled": len(output.schedule.tasks),
+                "project_start": output.schedule.project_start.isoformat(),
+                "project_end": output.schedule.project_end.isoformat(),
+                "total_duration_days": output.schedule.total_duration_days,
+                "critical_path": list(output.schedule.critical_path),
+                "conflicts": len(output.conflicts),
+                "overloaded_members": [m.member_id for m in output.capacity.members if m.is_overloaded],
+                "llm_estimated_tasks": [e.task_id for e in output.estimates if e.source == "llm"],
+                "explanation_source": output.explanation.source,
             },
         )
+        pv = create_draft_version(db, project_id=project_id, snapshot=snapshot, created_by=ACTOR)
+        write_audit(db, ACTOR, "agent3.schedule_completed", "project", project_id,
+                    after={"job_id": ctx.job_id, "version": pv.version, "tasks": len(snapshot["tasks"]),
+                           "conflicts": len(snapshot["conflicts"]), "overrides": len(overrides),
+                           "project_end": snapshot["schedule"]["project_end"], "draft_id": draft.id})
+        version = pv.version
         db.commit()
 
+    try:  # hand over to Agent 4 (one active review job per project at a time)
+        with SessionLocal() as db:
+            db.add(Job(project_id=project_id, type="agent4.review", params={"version": version},
+                       created_by=job.created_by))
+            db.commit()
+    except IntegrityError:
+        log.info("agent4.review already active for project %s", project_id)
     ctx.heartbeat(progress=100)
-    return (
-        f"draft:{draft.id};tasks:{len(out.schedule.tasks)};"
-        f"end:{out.schedule.project_end.isoformat()};conflicts:{len(out.conflicts)}"
-    )[:255]
+    return f"version:{version};tasks:{len(snapshot['tasks'])};draft:{draft.id};conflicts:{len(snapshot['conflicts'])}"[:255]

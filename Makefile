@@ -1,6 +1,6 @@
 # recipes start with ">" (not TAB) so copy/paste can't break this file
 .RECIPEPREFIX = >
-.PHONY: up down logs migrate seed testdb test eval eval-check eval-agent1 eval-agent2 eval-agent2-quality
+.PHONY: up down logs migrate seed testdb test eval eval-check eval-agent1 eval-agent2 eval-agent2-quality eval-agent4
 
 up:
 > docker compose up -d --build
@@ -35,6 +35,9 @@ eval-agent2:
 
 eval-agent2-quality:
 > PYTHONPATH=backend deepeval test run evals/test_deepeval_story_quality.py
+
+eval-agent4:
+> PYTHONPATH=backend python -m evals.run_agent4
 
 eval:
 > PYTHONPATH=backend deepeval test run evals/test_deepeval_smoke.py evals/test_deepeval_story_quality.py

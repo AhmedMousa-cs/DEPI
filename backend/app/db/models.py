@@ -13,6 +13,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -30,6 +31,8 @@ from app.db.base import Base
 #   jobs.status:       queued | running | waiting_for_pm | done | failed | cancelled
 #   user_stories.review_status / tasks.review_status: draft | approved | rejected
 #   tasks.status:      todo | in_progress | blocked | done
+#   plan_versions.status: draft | approved | rejected | superseded
+#   risks.status:      draft | open | dismissed | superseded
 
 
 class User(Base):
@@ -435,6 +438,68 @@ class Decision(Base):
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     decided_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     decided_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class PlanVersion(Base):
+    """One immutable-once-decided snapshot of the plan. Only the approval gate sets status=approved."""
+
+    __tablename__ = "plan_versions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20), default="draft")
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    base_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    diff_from_prev: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_by: Mapped[str] = mapped_column(String(60))
+    run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "version", name="uq_plan_versions_project_version"),
+        # at most one open draft per project
+        Index(
+            "uq_plan_versions_one_draft",
+            "project_id",
+            unique=True,
+            postgresql_where=text("status = 'draft'"),
+        ),
+    )
+
+
+class Risk(Base):
+    __tablename__ = "risks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    plan_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("plan_versions.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    title: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text)
+    severity: Mapped[str] = mapped_column(String(10))
+    likelihood: Mapped[str] = mapped_column(String(10))
+    mitigation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_refs: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
+    created_by: Mapped[str] = mapped_column(String(60))  # agent4_risk | rule:<name>
+    run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 

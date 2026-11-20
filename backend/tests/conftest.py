@@ -129,6 +129,10 @@ def clean_business_data():
                 """
             )
         )
+        # plan-approval gate threads are keyed by project id + version, and ids restart every test
+        for table in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
+            if connection.execute(text("SELECT to_regclass(:t)"), {"t": f"public.{table}"}).scalar():
+                connection.execute(text(f"DELETE FROM {table} WHERE thread_id LIKE 'project:%:plan:%'"))
 
 
 @pytest.fixture(autouse=True)

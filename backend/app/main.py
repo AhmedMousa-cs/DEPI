@@ -5,6 +5,7 @@ from app.api.auth import router as auth_router
 from app.api.changes import router as changes_router
 from app.api.graph import router as graph_router
 from app.api.jobs import router as jobs_router
+from app.api.plan import router as plan_router
 from app.api.planning import router as planning_router
 from app.api.portfolio import router as portfolio_router
 from app.api.projects import router as projects_router
@@ -36,6 +37,7 @@ app.include_router(reports_router)
 app.include_router(review_router)
 app.include_router(scope_router)
 app.include_router(planning_router)
+app.include_router(plan_router)
 app.include_router(scheduling_router)
 
 

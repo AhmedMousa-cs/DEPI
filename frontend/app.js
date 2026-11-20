@@ -6,7 +6,7 @@ const MAX_UPLOAD = 5 * 1024 * 1024;
 const STATUS = { setup: "Setup", planning: "Planning", scope_review: "Scope review", plan_review: "Plan review", active: "Active", closed: "Closed" };
 const KIND = { brief: "Brief", transcript: "Transcript", note: "Note", file: "File" };
 
-const state = { me: null, projects: [], project: null, team: [], leaders: [], page: "portfolio", tab: "overview", modal: null, notice: null, navOpen: false, reqs: [], scope: null, gaps: null, reqFilter: "all", job: null, stories: [], tasks: [], coverage: null, planFilter: "all", planJob: null, schedule: null, scheduleJob: null, chain: null, pf: null, theme: localStorage.getItem("nx-theme") || "light", lang: localStorage.getItem("nx-lang") || "en" };
+const state = { me: null, projects: [], project: null, team: [], leaders: [], page: "portfolio", tab: "overview", modal: null, notice: null, navOpen: false, reqs: [], scope: null, gaps: null, reqFilter: "all", job: null, stories: [], tasks: [], coverage: null, planFilter: "all", planJob: null, schedule: null, scheduleJob: null, chain: null, pf: null, planVersions: [], planVersionSel: null, planVersionDetail: null, planGate: null, planReviewJob: null, theme: localStorage.getItem("nx-theme") || "light", lang: localStorage.getItem("nx-lang") || "en" };
 const app = document.getElementById("app");
 const isPM = () => state.me && state.me.role === "PM";
 
@@ -93,6 +93,80 @@ const AR = {
   "Who is overloaded right now?": "مين محمّل فوق طاقته دلوقتي؟",
   "Which risks should I act on first?": "أنهي مخاطر أتعامل معاها الأول؟",
   "The AI assistant is available to the Project Manager.": "المساعد الذكي متاح لمدير المشروع.",
+  "Plan review": "مراجعة الخطة",
+  "Refresh": "تحديث",
+  "Run Agent 3 (new version)": "تشغيل Agent 3 (نسخة جديدة)",
+  "Review with Agent 4": "مراجعة بواسطة Agent 4",
+  "Working...": "جارٍ العمل...",
+  "No plan versions yet": "لا توجد نُسخ خطة بعد",
+  "Approve the work plan tasks, then run Agent 3 — each run persists a draft version that Agent 4 reviews.": "اعتمد مهام خطة العمل ثم شغّل Agent 3 — كل تشغيل يحفظ نسخة مسودة يراجعها Agent 4.",
+  "Version": "النسخة",
+  "Gate closed": "البوابة مغلقة",
+  "Waiting for your decision": "في انتظار قرارك",
+  "Gate completed": "البوابة مكتملة",
+  "Approve plan": "اعتماد الخطة",
+  "Reject plan": "رفض الخطة",
+  "Open approval gate": "فتح بوابة الاعتماد",
+  "Agent 4 review": "مراجعة Agent 4",
+  "Verdict": "الحكم",
+  "Likelihood": "الاحتمالية",
+  "Mitigation": "التخفيف",
+  "Rule": "قاعدة",
+  "Agent 4": "Agent 4",
+  "Planned tasks": "المهام المخططة",
+  "Resource conflicts": "تعارضات الموارد",
+  "Duration": "المدة",
+  "Tasks": "المهام",
+  "Task": "مهمة",
+  "Project": "المشروع",
+  "Risk": "خطر",
+  "Conflict": "تعارض",
+  "Unassigned": "غير مُسند",
+  "Float": "المرونة",
+  "working days": "أيام عمل",
+  "tasks": "مهام",
+  "Critical path": "المسار الحرج",
+  "Changes": "التغييرات",
+  "Tasks changed": "مهام تغيّرت",
+  "Tasks added": "مهام أُضيفت",
+  "Tasks removed": "مهام أُزيلت",
+  "Risks added": "مخاطر أُضيفت",
+  "End-date shift": "إزاحة تاريخ النهاية",
+  "Added": "أُضيف",
+  "Removed": "أُزيل",
+  "Changed": "تغيّر",
+  "This is the first version — there is nothing to compare against.": "دي أول نسخة — مفيش حاجة نقارن بيها.",
+  "Showing the first 60 changes.": "بيتم عرض أول 60 تغيير.",
+  "Deterministic diff of the two snapshots.": "مقارنة حتمية بين اللقطتين.",
+  "Everything that would change if this draft replaced the currently approved version.": "كل اللي هيتغير لو المسودة دي حلت محل النسخة المعتمدة حاليًا.",
+  "Changes vs the previous version": "التغييرات مقابل النسخة السابقة",
+  "Changes vs the approved plan": "التغييرات مقابل الخطة المعتمدة",
+  "Approval warnings": "تحذيرات الاعتماد",
+  "Warnings to acknowledge": "تحذيرات لازم تأكّدها",
+  "I acknowledge these warnings": "أقرّ بأني اطلعت على التحذيرات دي",
+  "No warnings: the conflicts, verdict and critical risks do not block this approval.": "لا توجد تحذيرات: التعارضات والحكم والمخاطر الحرجة لا تمنع الاعتماد.",
+  "Shown before approval; the PM must acknowledge them explicitly.": "تظهر قبل الاعتماد؛ ومدير المشروع لازم يقرّ بيها صراحة.",
+  "No risks stored for this version.": "مفيش مخاطر محفوظة للنسخة دي.",
+  "Stored per plan version. Approving promotes the draft risks to open; rejecting archives them.": "مخزنة لكل نسخة خطة. الاعتماد يرفع المخاطر من مسودة إلى مفتوحة، والرفض يؤرشفها.",
+  "Agent 4 has not reviewed this draft yet. Run the review before opening the gate.": "Agent 4 لسه ما راجعش المسودة دي. شغّل المراجعة قبل فتح البوابة.",
+  "One versioned snapshot of the whole plan. Agent 4 stores risks and findings; the PM approves or rejects the plan as a unit through the gate.": "لقطة واحدة برقم نسخة للخطة كلها. Agent 4 يحفظ المخاطر والملاحظات، ومدير المشروع يعتمد أو يرفض الخطة كوحدة واحدة من خلال البوابة.",
+  "LangGraph review over the snapshot: rules may raise a concern but can never lower the agent's verdict.": "مراجعة LangGraph على اللقطة: القواعد تقدر ترفع قلق لكن ما تقدرش تقلل من حكم الوكيل.",
+  "The approval gate is open — the project is in Plan review.": "بوابة الاعتماد مفتوحة — المشروع في مرحلة مراجعة الخطة.",
+  "Opening the gate moves the project to Plan review and waits for your decision.": "فتح البوابة ينقل المشروع لمراجعة الخطة وينتظر قرارك.",
+  "The gate is open: approving writes the snapshot dates to every task and moves the project to active. Rejecting archives the draft risks and writes nothing.": "البوابة مفتوحة: الاعتماد يكتب تواريخ اللقطة على كل مهمة وينقل المشروع للنشاط. الرفض يؤرشف مخاطر المسودة ولا يكتب أي شيء.",
+  "This plan is approved. Its snapshot dates are live on the tasks.": "الخطة دي معتمدة. تواريخها الحالية مطبقة على المهام.",
+  "This version was rejected. Nothing was written to the tasks.": "النسخة دي اترفضت. لم يُكتب أي شيء على المهام.",
+  "Plan rejected. Nothing was written to the tasks.": "تم رفض الخطة. لم يُكتب أي شيء على المهام.",
+  "The draft is rejected and its risks are archived. Nothing is written to the tasks.": "يتم رفض المسودة وأرشفة مخاطرها. لا يُكتب أي شيء على المهام.",
+  "Approving writes the snapshot dates to every task and moves the project to active.": "الاعتماد يكتب تواريخ اللقطة على كل مهمة وينقل المشروع للنشاط.",
+  "task date(s) written.": "تاريخ مهمة تم كتابته.",
+  "Built by": "أُنشئت بواسطة",
+  "based on v": "مبنية على النسخة ",
+  "Agent job": "مهمة الوكيل",
+  "Ready": "جاهز",
+  "Blocked": "متوقف",
+  "Reason *": "السبب *",
+  "Comment": "تعليق",
   "Overview": "نظرة عامة",
   "Scope review": "مراجعة النطاق",
   "Work plan": "خطة العمل",
@@ -457,9 +531,9 @@ function portfolioView() {
 function projectView() {
   const p = state.project;
   const tabs = [["overview", "Overview"], ["sources", "Sources (" + (p.sources || []).length + ")"], ["team", "Team (" + state.team.length + ")"]];
-  if (isPM()) tabs.push(["scope", "Scope review"], ["plan", "Work plan"], ["schedule", "Schedule"], ["changes", "Changes"]);
+  if (isPM()) tabs.push(["scope", "Scope review"], ["plan", "Work plan"], ["schedule", "Schedule"], ["planreview", "Plan review"], ["changes", "Changes"]);
   const later = ["Updates (M7)", "Decisions (M8)"];
-  return `<div class="workspace-head"><div class="workspace-title"><div class="project-monogram">${esc((p.name || "P")[0].toUpperCase())}</div><div><h1>${esc(p.name)}</h1><p>${esc(p.goal || "No goal added")}</p></div></div><div style="display:flex;gap:8px;align-items:center">${statusBadge(p.status)}${isPM() ? `<button class="btn btn-secondary btn-small" data-action="export-pdf">⬇ ${t("Export PDF")}</button><button class="btn btn-secondary btn-small" data-action="modal" data-modal="edit-project">${t("Edit project")}</button>` : ""}</div></div><div class="tabs">${tabs.map(t => `<button class="${state.tab === t[0] ? "active" : ""}" data-action="tab" data-tab="${t[0]}">${esc(t[1])}</button>`).join("")}${later.map(l => `<button disabled style="opacity:.45;cursor:not-allowed" title="Not available yet">${esc(l)}</button>`).join("")}</div>${state.tab === "sources" ? sourcesView() : state.tab === "team" ? teamView() : state.tab === "scope" ? scopeView() : state.tab === "plan" ? planView() : state.tab === "schedule" ? scheduleView() : state.tab === "changes" ? changeView() : overviewView()}`;
+  return `<div class="workspace-head"><div class="workspace-title"><div class="project-monogram">${esc((p.name || "P")[0].toUpperCase())}</div><div><h1>${esc(p.name)}</h1><p>${esc(p.goal || "No goal added")}</p></div></div><div style="display:flex;gap:8px;align-items:center">${statusBadge(p.status)}${isPM() ? `<button class="btn btn-secondary btn-small" data-action="export-pdf">⬇ ${t("Export PDF")}</button><button class="btn btn-secondary btn-small" data-action="modal" data-modal="edit-project">${t("Edit project")}</button>` : ""}</div></div><div class="tabs">${tabs.map(t => `<button class="${state.tab === t[0] ? "active" : ""}" data-action="tab" data-tab="${t[0]}">${esc(t[1])}</button>`).join("")}${later.map(l => `<button disabled style="opacity:.45;cursor:not-allowed" title="Not available yet">${esc(l)}</button>`).join("")}</div>${state.tab === "sources" ? sourcesView() : state.tab === "team" ? teamView() : state.tab === "scope" ? scopeView() : state.tab === "plan" ? planView() : state.tab === "schedule" ? scheduleView() : state.tab === "planreview" ? planReviewView() : state.tab === "changes" ? changeView() : overviewView()}`;
 }
 
 function overviewView() {
@@ -519,7 +593,7 @@ function modalView() {
 function render() {
   const notice = state.notice; state.notice = null;
   const body = state.page === "project" && state.project ? projectView() : portfolioView();
-  app.innerHTML = `<div class="app-shell">${sidebar()}<div class="main-area">${topbar()}<main class="content">${notice ? noticeHtml(notice) : ""}${body}</main></div></div>${state.modal ? (state.modal.type === "decide-req" || state.modal.type === "decide-req-bulk" ? scopeModal() : state.modal.type === "decide-story" || state.modal.type === "decide-task" ? planModal() : state.modal.type === "decide-schedule" ? scheduleModal() : modalView()) : ""}`;
+  app.innerHTML = `<div class="app-shell">${sidebar()}<div class="main-area">${topbar()}<main class="content">${notice ? noticeHtml(notice) : ""}${body}</main></div></div>${state.modal ? (state.modal.type === "decide-req" || state.modal.type === "decide-req-bulk" ? scopeModal() : state.modal.type === "decide-story" || state.modal.type === "decide-task" ? planModal() : state.modal.type === "decide-schedule" ? scheduleModal() : state.modal.type === "plan-approve" || state.modal.type === "plan-reject" ? planGateModal() : modalView()) : ""}`;
   translateDom(app);
 }
 
@@ -890,6 +964,14 @@ Object.assign(actions, {
     }
     if (t.dataset.tab === "changes") {
       await reloadChanges();
+    }
+    if (t.dataset.tab === "planreview") {
+      await reloadPlanReview();
+      try {
+        const jobs = await api(`/projects/${state.project.id}/jobs`);
+        const active = jobs.find(j => ["agent4.review", "agent3.schedule"].includes(j.type) && ["queued", "running"].includes(j.status));
+        if (active) { state.planReviewJob = active; pollPlanReviewJob(active.id); }
+      } catch (e) { if (e.message === "unauthorized") throw e; }
     }
     baseTab(t);
   },
@@ -1444,5 +1526,195 @@ Object.assign(submitters, {
     await post(`/projects/${state.project.id}/scheduling/${state.schedule.id}/decision`, { decision: "rejected", comment: String(d.get("comment") || "").trim() });
     state.modal = null; await reloadSchedule();
     state.notice = { type: "ok", text: "Schedule rejected. No dates were written." }; render();
+  },
+});
+
+/* ---------- M6-B plan versions, Agent 4 review and the PM approval gate ---------- */
+let planReviewTimer = null;
+
+const PV_LABEL = { draft: "Draft", approved: "Approved", rejected: "Rejected", superseded: "Superseded" };
+const RISK_BADGE = { low: "green", medium: "blue", high: "", critical: "red" };
+const RISK_STATUS = { draft: "Draft", open: "Open", dismissed: "Dismissed", superseded: "Superseded" };
+const VERDICT_VIEW = { ready: ["Ready", "green"], needs_attention: ["Needs attention", ""], blocked: ["Blocked", "red"] };
+
+const pvBadge = s => `<span class="badge ${s === "approved" ? "green" : s === "rejected" ? "red" : s === "draft" ? "blue" : ""}">${esc(t(PV_LABEL[s] || s))}</span>`;
+
+async function reloadPlanReview() {
+  const id = state.project.id;
+  const versions = await api(`/projects/${id}/plan/versions`).catch(e => { if (e.message === "unauthorized") throw e; return []; });
+  state.planVersions = versions;
+  if (!versions.some(v => v.version === state.planVersionSel)) {
+    const draft = versions.find(v => v.status === "draft");
+    state.planVersionSel = draft ? draft.version : (versions[0] ? versions[0].version : null);
+  }
+  if (state.planVersionSel == null) { state.planVersionDetail = null; state.planGate = null; return; }
+  const v = state.planVersionSel;
+  const [detail, gate] = await Promise.all([
+    api(`/projects/${id}/plan/versions/${v}`).catch(e => { if (e.message === "unauthorized") throw e; return null; }),
+    api(`/projects/${id}/plan/versions/${v}/gate`).catch(e => { if (e.message === "unauthorized") throw e; return null; }),
+  ]);
+  state.planVersionDetail = detail;
+  state.planGate = gate;
+}
+
+function pollPlanReviewJob(jobId) {
+  clearInterval(planReviewTimer);
+  const tick = async () => {
+    try {
+      const j = await api(`/jobs/${jobId}`);
+      state.planReviewJob = j;
+      const finished = ["done", "failed", "cancelled", "waiting_for_pm"].includes(j.status);
+      if (finished) clearInterval(planReviewTimer);
+      if (state.page === "project" && state.tab === "planreview") {
+        if (finished) { await reloadPlanReview(); await reloadProject(); }
+        if (!state.modal) render();
+      }
+    } catch (e) { clearInterval(planReviewTimer); }
+  };
+  tick(); planReviewTimer = setInterval(tick, 3000);
+}
+
+function pvValue(v) {
+  if (v == null) return "—";
+  if (Array.isArray(v)) return v.length ? v.join(", ") : "—";
+  return String(v);
+}
+
+function pvDiffTable(diff) {
+  if (!diff) return "";
+  if (diff.initial) return `<p class="subtle">${t("This is the first version — there is nothing to compare against.")}</p>`;
+  const s = diff.summary || {};
+  const chips = `<div class="pf-chips">${pfChip(String(s.changes || 0), t("Changes"), (s.changes || 0) ? "warn" : "ok")}${pfChip(String(s.tasks_changed || 0), t("Tasks changed"), "")}${pfChip(String(s.tasks_added || 0), t("Tasks added"), "")}${pfChip(String(s.tasks_removed || 0), t("Tasks removed"), "")}${pfChip(String(s.risks_added || 0), t("Risks added"), (s.risks_added || 0) ? "warn" : "")}${s.end_date_shift_calendar_days != null ? pfChip((s.end_date_shift_calendar_days > 0 ? "+" : "") + s.end_date_shift_calendar_days + "d", t("End-date shift"), s.end_date_shift_calendar_days > 0 ? "bad" : "ok") : ""}</div>`;
+  const rows = (diff.changes || []).slice(0, 60).map(c => `<tr><td style="padding:3px 8px;border-top:1px solid var(--line)">${esc(t(c.scope === "task" ? "Task" : c.scope === "risk" ? "Risk" : c.scope === "conflict" ? "Conflict" : "Project"))}</td><td style="padding:3px 8px;border-top:1px solid var(--line)">${esc(c.label || "")}</td><td style="padding:3px 8px;border-top:1px solid var(--line)"><span class="badge ${c.change === "added" ? "green" : c.change === "removed" ? "red" : "blue"}">${esc(t(c.change === "added" ? "Added" : c.change === "removed" ? "Removed" : "Changed"))}</span></td><td style="padding:3px 8px;border-top:1px solid var(--line);color:var(--ink-soft)">${esc(c.field ? t(c.field) : "")}</td><td style="padding:3px 8px;border-top:1px solid var(--line);color:var(--ink-soft)">${esc(pvValue(c.old))}</td><td style="padding:3px 8px;border-top:1px solid var(--line);font-weight:700">${esc(pvValue(c.new))}</td></tr>`).join("");
+  return `${chips}${rows ? `<table style="border-collapse:collapse;margin:8px 0;font-size:13px"><tbody>${rows}</tbody></table>` : ""}${(diff.changes || []).length > 60 ? `<p class="subtle">${t("Showing the first 60 changes.")}</p>` : ""}`;
+}
+
+function pvReviewCard(snapshot) {
+  const review = (snapshot || {}).review;
+  if (!review) return `<div class="callout warning">${t("Agent 4 has not reviewed this draft yet. Run the review before opening the gate.")}</div>`;
+  const v = VERDICT_VIEW[review.verdict] || [review.verdict, ""];
+  const findings = (review.findings || []).map(f => `<li>${esc(f)}</li>`).join("");
+  return `<div class="keyvals">${kv(t("Verdict"), t(v[0]))}${kv(t("Summary"), review.summary || "—")}</div>${findings ? `<ul style="margin:8px 0 0 18px;font-size:13px">${findings}</ul>` : ""}`;
+}
+
+function pvRiskRow(r) {
+  const sev = `<span class="badge ${RISK_BADGE[r.severity] || ""}">${esc(t(r.severity))}</span>`;
+  const ev = (r.evidence_refs || []).map(e => `<span class="badge">${esc(e.type)}${e.id ? " #" + esc(e.id) : ""}</span>`).join(" ");
+  const origin = r.created_by && r.created_by.startsWith("rule:") ? `<span class="badge">${esc(t("Rule"))}: ${esc(r.created_by.slice(5))}</span>` : `<span class="badge blue">${esc(t("Agent 4"))}</span>`;
+  return `<div class="project-row" style="align-items:flex-start"><div style="flex:1;min-width:0"><div class="project-title">${esc(r.title)} ${sev}<span class="badge">${esc(t(RISK_STATUS[r.status] || r.status))}</span></div><div class="row-meta">${origin}${ev}<span class="subtle">${esc(t("Likelihood"))}: ${esc(t(r.likelihood))}</span></div><div class="subtle">${esc(r.description)}</div>${r.mitigation ? `<div class="subtle">${esc(t("Mitigation"))}: ${esc(r.mitigation)}</div>` : ""}</div></div>`;
+}
+
+function planReviewView() {
+  const versions = state.planVersions || [];
+  const d = state.planVersionDetail;
+  const gate = state.planGate;
+  const job = state.planReviewJob;
+  const running = job && ["queued", "running"].includes(job.status);
+  const openable = ["planning", "plan_review", "active"].includes(state.project.status);
+  const jobLine = job ? `<div class="callout${job.status === "failed" ? " warning" : ""}">${t("Agent job")} #${esc(job.id)} (${esc(job.type)}): <b>${esc(job.status)}</b> (${esc(job.progress)}%)${job.error ? "<br>" + esc(job.error) : ""}</div>` : "";
+  const head = `<div class="page-head"><div><div class="eyebrow">M6-B · Agent 4</div><h1>${t("Plan review")}</h1><p>${t("One versioned snapshot of the whole plan. Agent 4 stores risks and findings; the PM approves or rejects the plan as a unit through the gate.")}</p></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-secondary btn-small" data-action="plan-refresh">${t("Refresh")}</button><button class="btn btn-secondary btn-small" data-action="plan-generate"${running || !openable ? " disabled" : ""}>${t("Run Agent 3 (new version)")}</button><button class="btn btn-primary btn-small" data-action="plan-review"${running || !d || d.status !== "draft" ? " disabled" : ""}>${running ? t("Working...") : t("Review with Agent 4")}</button></div></div>`;
+  if (!versions.length) return `${head}${jobLine}<section class="card"><div class="card-body"><div class="empty"><div class="empty-icon">◈</div><h3>${t("No plan versions yet")}</h3><p>${t("Approve the work plan tasks, then run Agent 3 — each run persists a draft version that Agent 4 reviews.")}</p></div></div></section>`;
+
+  const versionChips = versions.map(v => `<button class="btn ${state.planVersionSel === v.version ? "btn-primary" : "btn-secondary"} btn-small" data-action="plan-version" data-v="${v.version}">v${esc(v.version)} · ${t(PV_LABEL[v.status] || v.status)}</button>`).join(" ");
+  if (!d) return `${head}${jobLine}<div style="display:flex;gap:6px;flex-wrap:wrap;margin:12px 0">${versionChips}</div>`;
+
+  const snap = d.snapshot || {};
+  const sched = snap.schedule || {};
+  const tasks = snap.tasks || [];
+  const conflicts = snap.conflicts || [];
+  const risks = d.risks || [];
+  const warnings = d.warnings || [];
+  const gateState = gate ? gate.state : "not_started";
+  const gateBadge = gateState === "waiting_for_pm" ? `<span class="badge" style="background:#fff4e5;color:#9a5b00">${t("Waiting for your decision")}</span>` : gateState === "completed" ? `<span class="badge green">${t("Gate completed")}</span>` : `<span class="badge">${t("Gate closed")}</span>`;
+  const draft = d.status === "draft";
+
+  const gateActions = !draft
+    ? `<div class="callout">${d.status === "approved" ? t("This plan is approved. Its snapshot dates are live on the tasks.") : t("This version was rejected. Nothing was written to the tasks.")}</div>`
+    : `<div class="item-actions" style="margin-top:12px;flex-wrap:wrap">${gateState === "waiting_for_pm"
+        ? `<button class="btn btn-primary" data-action="plan-approve">${t("Approve plan")}</button><button class="btn btn-secondary" data-action="plan-reject">${t("Reject plan")}</button>`
+        : `<button class="btn btn-primary" data-action="plan-open-gate"${openable ? "" : " disabled"}>${t("Open approval gate")}</button>`}</div>
+      <p class="subtle" style="margin-top:6px">${gateState === "waiting_for_pm" ? t("The gate is open: approving writes the snapshot dates to every task and moves the project to active. Rejecting archives the draft risks and writes nothing.") : t("Opening the gate moves the project to Plan review and waits for your decision.")}</p>`;
+
+  const warningsHtml = warnings.length ? `<div class="callout warning"><b>${t("Warnings to acknowledge")}</b><br>${warnings.map(esc).join("<br>")}</div>` : `<div class="callout">${t("No warnings: the conflicts, verdict and critical risks do not block this approval.")}</div>`;
+  const reviewHtml = pvReviewCard(snap);
+  const taskRows = tasks.map(x => `<div class="project-row"><div style="flex:1;min-width:0"><div class="project-title">${esc(x.title)} ${x.is_critical ? `<span class="badge" style="background:#fff4e5;color:#9a5b00">${t("Critical")}</span>` : ""}</div><div class="row-meta"><span class="badge">${esc(fmtDate(x.start))} → ${esc(fmtDate(x.end))}</span><span class="badge">${esc(x.duration_days)} ${t("working days")}</span><span class="badge">${esc(x.assignee_member_id ? (memberName(x.assignee_member_id) || "#" + x.assignee_member_id) : t("Unassigned"))}</span>${x.total_float > 0 ? `<span class="subtle">${t("Float")}: ${esc(x.total_float)}</span>` : ""}</div></div></div>`).join("");
+
+  const approvedNote = d.approved_at ? `<p class="subtle" style="margin-top:8px">${t("Approved")} ${esc(fmtDateTime(d.approved_at))}</p>` : "";
+  const vsApproved = d.diff_vs_approved ? `<section class="card section-card"><h2>${t("Changes vs the approved plan")}</h2><p class="section-intro">${t("Everything that would change if this draft replaced the currently approved version.")}</p>${pvDiffTable(d.diff_vs_approved)}</section>` : "";
+
+  return `${head}${jobLine}
+<div style="display:flex;gap:6px;flex-wrap:wrap;margin:12px 0">${versionChips}</div>
+<div class="grid two-col">
+  <section class="card section-card"><h2>${t("Version")} ${esc(d.version)} ${pvBadge(d.status)} ${gateBadge}</h2>
+    <p class="section-intro">${t("Built by")} ${esc(d.created_by)} · ${esc(fmtDateTime(d.created_at))}${d.base_version ? " · " + t("based on v") + esc(d.base_version) : ""}</p>
+    <div class="keyvals">${kv(t("Project start"), fmtDate(sched.project_start))}${kv(t("Project end"), fmtDate(sched.project_end))}${kv(t("Duration"), (sched.total_duration_days || 0) + " " + t("working days"))}${kv(t("Tasks"), String(tasks.length))}${kv(t("Critical path"), String((sched.critical_path || []).length) + " " + t("tasks"))}${kv(t("Resource conflicts"), String(conflicts.length))}${kv(t("Open risks"), String(risks.filter(r => r.status === "draft" || r.status === "open").length))}</div>
+    ${approvedNote}${gateActions}
+  </section>
+  <section class="card section-card"><h2>${t("Agent 4 review")}</h2><p class="section-intro">${t("LangGraph review over the snapshot: rules may raise a concern but can never lower the agent's verdict.")}</p>${reviewHtml}</section>
+</div>
+<section class="card section-card"><h2>${t("Approval warnings")}</h2><p class="section-intro">${t("Shown before approval; the PM must acknowledge them explicitly.")}</p>${warningsHtml}</section>
+${vsApproved}
+<section class="card section-card"><h2>${t("Changes vs the previous version")}</h2><p class="section-intro">${t("Deterministic diff of the two snapshots.")}</p>${pvDiffTable(d.diff_from_prev)}</section>
+<section class="card section-card"><h2>${t("Risks")} (${risks.length})</h2><p class="section-intro">${t("Stored per plan version. Approving promotes the draft risks to open; rejecting archives them.")}</p><div class="card-body">${risks.length ? `<div class="project-list">${risks.map(pvRiskRow).join("")}</div>` : `<div class="callout">${t("No risks stored for this version.")}</div>`}</div></section>
+<section class="card section-card"><h2>${t("Planned tasks")} (${tasks.length})</h2><div class="card-body"><div class="project-list">${taskRows}</div></div></section>`;
+}
+
+function planGateModal() {
+  const m = state.modal;
+  const d = m.detail || state.planVersionDetail || { version: "?", warnings: [] };
+  const warnings = d.warnings || [];
+  if (m.type === "plan-reject")
+    return modalShell(t("Reject plan"), t("The draft is rejected and its risks are archived. Nothing is written to the tasks."), "plan-reject",
+      field(t("Reason *"), '<textarea name="comment" required minlength="3" maxlength="2000"></textarea>', true), t("Reject plan"));
+  return modalShell(t("Approve plan"), t("Approving writes the snapshot dates to every task and moves the project to active."), "plan-approve",
+    `${warnings.length ? `<div class="callout warning"><b>${t("Warnings to acknowledge")}</b><br>${warnings.map(esc).join("<br>")}</div><label style="display:flex;gap:8px;align-items:center;margin:8px 0"><input type="checkbox" name="ack" required> ${t("I acknowledge these warnings")}</label>` : ""}${field(t("Comment"), '<textarea name="comment" maxlength="2000"></textarea>', true)}`, t("Approve plan"));
+}
+
+Object.assign(actions, {
+  "plan-refresh": async () => { await reloadPlanReview(); await reloadProject(); render(); },
+  "plan-version": async el => { state.planVersionSel = Number(el.dataset.v); await reloadPlanReview(); render(); },
+  "plan-generate": async () => {
+    if (!confirm(t("Run Agent 3? A new draft plan version is stored and Agent 4 reviews it next. Task dates are written only when you approve the plan."))) return;
+    try {
+      const job = await post(`/projects/${state.project.id}/plan/generate`, {});
+      state.planReviewJob = job; render(); pollPlanReviewJob(job.id);
+    } catch (e) { state.notice = { type: "bad", text: e.message }; render(); }
+  },
+  "plan-review": async () => {
+    try {
+      const job = await post(`/projects/${state.project.id}/plan/review`, {});
+      state.planReviewJob = job; render(); pollPlanReviewJob(job.id);
+    } catch (e) { state.notice = { type: "bad", text: e.message }; render(); }
+  },
+  "plan-open-gate": async () => {
+    try {
+      state.planGate = await post(`/projects/${state.project.id}/plan/versions/${state.planVersionSel}/open-gate`, {});
+      await reloadProject(); await reloadPlanReview();
+      state.notice = { type: "ok", text: t("The approval gate is open — the project is in Plan review.") }; render();
+    } catch (e) { state.notice = { type: "bad", text: e.message }; render(); }
+  },
+  "plan-approve": () => { state.modal = { type: "plan-approve", detail: state.planVersionDetail }; render(); },
+  "plan-reject": () => { state.modal = { type: "plan-reject", detail: state.planVersionDetail }; render(); },
+});
+
+Object.assign(submitters, {
+  "plan-approve": async form => {
+    const fd = new FormData(form);
+    try {
+      const res = await post(`/projects/${state.project.id}/plan/versions/${state.planVersionSel}/approve`, {
+        comment: String(fd.get("comment") || "").trim(),
+        acknowledge_warnings: !!fd.get("ack"),
+      });
+      state.modal = null; await reloadProject(); await reloadPlanReview(); await reloadSchedule();
+      state.notice = { type: "ok", text: t("Plan") + " v" + res.version + " " + t("approved") + " — " + (res.tasks_applied || 0) + " " + t("task date(s) written.") }; render();
+    } catch (e) { showModalError(e.message); }
+  },
+  "plan-reject": async form => {
+    const fd = new FormData(form);
+    try {
+      await post(`/projects/${state.project.id}/plan/versions/${state.planVersionSel}/reject`, { comment: String(fd.get("comment") || "").trim() });
+      state.modal = null; await reloadProject(); await reloadPlanReview();
+      state.notice = { type: "ok", text: t("Plan rejected. Nothing was written to the tasks.") }; render();
+    } catch (e) { showModalError(e.message); }
   },
 });

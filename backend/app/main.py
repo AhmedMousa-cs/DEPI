@@ -2,12 +2,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.auth import router as auth_router
+from app.api.changes import router as changes_router
 from app.api.graph import router as graph_router
 from app.api.jobs import router as jobs_router
 from app.api.plan import router as plan_router
 from app.api.planning import router as planning_router
 from app.api.portfolio import router as portfolio_router
 from app.api.projects import router as projects_router
+from app.api.reports import router as reports_router
 from app.api.review import router as review_router
 from app.api.scheduling import router as scheduling_router
 from app.api.scope import router as scope_router
@@ -23,6 +25,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(auth_router)
+app.include_router(changes_router)
 app.include_router(users_router)
 app.include_router(projects_router)
 app.include_router(sources_router)
@@ -30,6 +33,7 @@ app.include_router(team_router)
 app.include_router(jobs_router)
 app.include_router(graph_router)
 app.include_router(portfolio_router)
+app.include_router(reports_router)
 app.include_router(review_router)
 app.include_router(scope_router)
 app.include_router(planning_router)

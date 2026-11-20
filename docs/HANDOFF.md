@@ -8,6 +8,43 @@ M6.1 (Agent 3 platform integration) is on branch feature/m6-agent3-integration (
 M4.1 (Agent 1 smart review: modules/priorities/questions/bulk/gaps) is on branch feature/agent1-smart-review (stacked on M6.1).
 M7 (PM command center: portfolio/resources/risks + assistant chat) is on branch feature/m7-pm-command-center (stacked on feature/agent1-smart-review).
 M8 (frontend polish: dark mode + Arabic/RTL + portfolio charts) is on branch feature/m8-polish (stacked on M7).
+M9 (delivery tracking + Gantt) is on branch feature/m9-gantt-delivery (stacked on feature/m8-polish).
+M10 (PDF export) is on branch feature/m10-pdf-export (stacked on feature/m9-gantt-delivery).
+M11 (change management) is on branch feature/m11-change-management (stacked on feature/m10-pdf-export); merged to main via PR #53 together with #52 (M9+M10).
+M6-B (plan approval gate + Agent 4: plan_versions/risks, LangGraph review, PM-only gate) arrives on branch feature/m6-agent4-approval-gate (teammate Mahmoud, PR #47) integrated with M6.1 as a hybrid Agent 3 job.
+
+## M6-B evidence (plan approval gate + Agent 4)
+- [x] Merged main (M4.1/M6.1/M7/M8/M9/M10/M11) into `feature/m6-agent4-approval-gate`; conflicts resolved in models.py (PlanVersion+Risk kept alongside CoverageReport+ScheduleDraft), main.py (plan+scheduling routers), job_handlers.py (agent4_job), requirements.txt (langchain + reportlab union), decisions.md (teammate ADR renumbered 011 -> 018 -> **ADR-021**, M9 keeps ADR-018)
+- [x] Hybrid Agent 3 contract: one `agent3.schedule` job persists BOTH the M6.1 `schedule_draft` (PM approval writes dates, unchanged) and a draft `plan_version` (feeds Agent 4 + plan gate), then queues `agent4.review`; agents still never write task rows
+- [x] plan_versions/risks migration `9d4e6a8c1b25` re-chained on the single head (`d9e4f7b2c5a3` after M11 merged) - `alembic heads` = one head
+- [x] Full backend suite in the container on the merged branch: **577 passed** (previous 469 + 18 Agent 4 job tests + M9/M10/M11 suites); single-run policy respected
+- [ ] Frontend: Plan review UI for Agent 4 / the approval gate (not yet wired)
+
+## M11 evidence (change management)
+- [x] New table `change_requests` (migration `d9e4f7b2c5a3`, chained on the single head `a7c3e1d9f2b8`; applied to the dev DB, `alembic current` = d9e4f7b2c5a3): field-level payload diff (before/after, only fields that actually change), stored deterministic impact, reason, status draft|approved|rejected
+- [x] 6 new tests (`tests/test_change_management.py`): deterministic impact (critical delay + dependent shift), approve applies + reject closes + re-decide 409, capacity overload flag, draft task 409 / unknown 404 / no-op 422, TL 403, list project-scoped + status filter - **6/6 pass**
+- [x] Full backend suite in the container: **469 passed** (463 + 6 change tests); single-run policy respected
+- [x] Impact is computed by CODE, not an LLM: critical-path end delay  high + project end moves, dependent tasks listed from `task_dependencies`, past start  low, estimate/assignee change  capacity check (load vs weekly capacity in the window); overall severity = worst finding
+- [x] API PM-only: `GET /projects/{pid}/changes[?status=]`, `POST /projects/{pid}/changes` (201, no-op 422, draft task 409, unknown task 404), `POST /projects/{pid}/changes/{id}/decision` (approve applies the change + audit `change.decision` with the applied snapshot; reject closes untouched; re-decide 409); proposals write audit `change.proposed`
+- [x] Frontend: **Changes** tab (chips open / high-impact / applied) with diff table, impact findings, Approve & apply / Reject (with confirm); approved tasks in the Work plan get a **"Change..."** button  propose modal; proposing jumps to the Changes tab with the computed impact in the notice
+- [x] Live e2e in the browser (project 14 "مدرسه"): proposed CR #1 on critical task #76 (end  2026-11-27) with an Arabic reason  impact high, 2 findings; Approve & apply applied it (DB: task end = 2026-11-27); audit rows 350-351 (`change.proposed` + `change.decision` with the applied snapshot); Arabic RTL verified ("التغييرات", chips "طلبات تغيير مفتوحة / أثر عالٍ / مطبَّق"); zero console errors
+
+## M10 evidence (PDF export)
+- [x] `GET /projects/{pid}/report.pdf` PM-only; reportlab + bundled Amiri (Regular+Bold, Latin+Arabic coverage verified via cmap); arabic_reshaper + python-bidi for shaping/order — no LLM anywhere
+- [x] 4 new tests (`tests/test_report_pdf.py`): real %PDF bytes + content-type + download filename + pypdf page/text checks ("Project status report", "Tasks"), Arabic project name doesn't break the PDF, TL 403, unknown project 404 — **4/4 pass**
+- [x] Full backend suite in the container: **463 passed** (459 + 4 report tests)
+- [x] Content mirrors the app: header + summary (health, hours-weighted progress, window, next deadline, task counts, pending drafts, overdue), drawn Gantt (same colors/logic as M9 UI, today line), full tasks table, project risks with suggested actions, governance footer
+- [x] Frontend "⬇ Export PDF" on the project header (PM only): fetch → blob → download (JWT in the header, so a plain link would not authenticate); verified live on project 14 (36.8KB, starts with %PDF-); Arabic notice strings included
+- [x] Small robustness fix found during verification: project header now guards `p.sources` before the reload completes
+
+## M9 evidence (delivery tracking + Gantt)
+- [x] Backend: `PATCH /projects/{pid}/tasks/{tid}/progress` PM-only; `todo → 0%`, `done → 100%`, `in_progress` keeps/sets the percent; draft task 409, unknown 404, non-PM 403; audit `task.progress` with before/after — **6/6 new tests pass** (`tests/test_delivery_progress.py`); service `app/services/delivery.py`
+- [x] Full backend suite in the container: **459 passed** (453 baseline + 6 delivery tests)
+- [x] No migration needed: progress_pct/status/start/end already existed on tasks
+- [x] Gantt on the Schedule tab (no libraries): rows for approved+dated tasks over the project window; done → green, critical → orange, overdue → dashed red outline; red "today" marker; per-bar progress fill + % label; two-line row layout keeps it usable narrow and in RTL (direction-aware `margin-inline-start`/`inset-inline-*`)
+- [x] Per-row delivery controls (Todo / ▶ Start / Done + % input) call the PATCH and re-render; summary chips: hours-weighted overall %, done/total, in progress, overdue
+- [x] Verified live in the browser (project 14 "مدرسه", 11 dated approved tasks): Start → In progress 0%, % → 45% (chips: 5% overall), Done → 100% green (chips: 12% overall, 1/11); Arabic RTL Gantt fully translated ("مخطط جانت — تتبع التنفيذ", "مكتملة", dates "17 نوفمبر 2026"); dark mode colors follow the CSS variables; zero console errors
+- [x] Portfolio auto-sync with zero extra code: after the Done click the command-center card for "مدرسه" showed 12% · 1/11 tasks done; audit rows 341-343 show the full before/after chain (todo 0 → in_progress 45 → done 100)
 
 ## M8 evidence (frontend polish)
 - [x] `node --check` passes; verified in a real browser: both toggles persist across a reload (`nx-theme`, `nx-lang` in localStorage)

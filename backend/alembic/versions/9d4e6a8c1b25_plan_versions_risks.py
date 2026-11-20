@@ -1,7 +1,7 @@
 """plan_versions and risks (M6 / US04) — re-chained on the current head after the m6-B merge.
 
 Revision ID: 9d4e6a8c1b25
-Revises: a7c3e1d9f2b8
+Revises: d9e4f7b2c5a3
 Create Date: 2026-11-14 12:00:00
 """
 import sqlalchemy as sa
@@ -9,7 +9,7 @@ from alembic import op
 
 revision = "9d4e6a8c1b25"
 # IMPORTANT: must be the CURRENT head. Check with:  alembic heads
-down_revision = "a7c3e1d9f2b8"
+down_revision = "d9e4f7b2c5a3"
 branch_labels = None
 depends_on = None
 

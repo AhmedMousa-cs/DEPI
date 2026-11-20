@@ -391,6 +391,40 @@ class TaskDependency(Base):
     )
 
 
+class ChangeRequest(Base):
+    """M11 change management: the PM's formal, audited edit of an APPROVED item.
+
+    Every change to an approved task goes through here: propose (with a
+    deterministic impact analysis computed by code) -> decide. Agents never
+    create or approve change requests; approving applies the change and audits it.
+    """
+
+    __tablename__ = "change_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    kind: Mapped[str] = mapped_column(String(40), default="task_update")
+    target_task_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), nullable=True
+    )
+    # {"before": {...}, "after": {...}} — field-level diff of what is proposed
+    payload: Mapped[dict] = mapped_column(JSON)
+    # deterministic analysis stored at proposal time (dates shift, critical path,
+    # dependents, assignee load) so the PM decides with the numbers
+    impact: Mapped[dict] = mapped_column(JSON, default=dict)
+    reason: Mapped[str] = mapped_column(Text)
+    # draft | approved | rejected
+    status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
+    created_by: Mapped[str] = mapped_column(String(100))
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class Decision(Base):
     __tablename__ = "decisions"
 

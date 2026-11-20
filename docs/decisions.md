@@ -156,6 +156,46 @@ OCR; meeting recording/transcription; automatic external messages; one independe
   - **Charts (pure SVG/CSS, zero libraries)**: a health donut + legend and a "progress by project" bar chart on the Projects tab, "utilization by person" + "capacity per week" bars on Resources, and a "risks by type" bar chart + severity donut on Risks.
 - **Consequence:** the same UI presents professionally in both themes and both languages, and the portfolio reads at a glance — with no new dependency and no risk to the deterministic backend.
 
+### ADR-018: Delivery tracking — the PM records execution; Gantt on the Schedule tab (M9)
+- **Status:** Approved
+- **Context:** The schedule produced real dates but nothing recorded what actually happened. The PM asked for a Gantt view plus delivery tracking (list position #1 on the roadmap). Teammate Agent 4 work (plan approval gate, plan_versions) lives on separate branches — no feature overlap.
+- **Decision:**
+  - **One PM-only endpoint**: `PATCH /projects/{project_id}/tasks/{task_id}/progress` (planning router) validates a `TaskProgressUpdate` {status: todo|in_progress|done, progress_pct 0-100 optional}. Rules: `todo → 0%`, `done → 100%`, `in_progress` keeps the current percent unless one is sent. Draft or rejected tasks get 409; unknown task 404; non-PM 403. Service: `app/services/delivery.py` (`update_task_progress`); audit action `task.progress` with before/after.
+  - **Gantt on the Schedule tab** (frontend, no libraries): rows for **approved, dated tasks only**, positioned by the project window (min start → max end). Bar colors: done → green, critical-path → orange, else blue; overdue (end < today, not done) gets a dashed red outline and row accent; a red "today" marker spans the tracks; each bar shows a white progress fill + percent label. Row layout is two-line (label + controls above, full-width track below) so it holds up at narrow widths and in RTL (`margin-inline-start` / `inset-inline-*` are direction-aware).
+  - **Controls per row**: Todo / ▶ Start / Done buttons plus a percent input with a "%" button (sets in_progress with the given percent); every action PATCHes and re-renders. Summary chips: hours-weighted overall progress, done/total, in progress, overdue.
+  - **Zero extra wiring for the portfolio**: the command center's hours-weighted progress already reads task status/progress_pct, so delivery updates flow into the PM's portfolio automatically (verified live: task → 100% ⇒ project card 12%).
+- **Consequence:** the loop plan → approve → execute → see progress closes with one audited endpoint; agents still never write execution progress, and no new table or migration was needed.
+
+### ADR-019: PDF export — deterministic reportlab report (M10)
+- **Status:** Approved
+- **Context:** The PM asked to export the project as a PDF (roadmap #2). The report must match what the UI shows, be printable for stakeholders, and handle Arabic project names.
+- **Decision:**
+  - **Server-side, dependency-light**: `GET /projects/{project_id}/report.pdf` (PM-only) builds the bytes with **reportlab** — no browser printing tricks, no LLM. `arabic-reshaper` + `python-bidi` fix shaping/order (reportlab does no bidi), and the bundled **Amiri** TTFs (`app/assets/fonts/`, Regular + Bold, ~830KB committed) cover Latin *and* Arabic in one font — verified via the TTF cmap before choosing it (Noto Naskh Arabic lacks Latin letters).
+  - **Content mirrors the app's own numbers**: header (project, status, generated timestamp), summary table reusing `project_card` (health + reasons, hours-weighted progress, execution window, next deadline, task counts, pending drafts, overdue), a drawn **Gantt** (same colors/logic as the M9 UI: green done, orange critical, red overdue dot + today line), a full tasks table (assignee, dates, status, %, critical flag) and the project's risks from the M7 register with suggested actions.
+  - **Frontend**: "⬇ Export PDF" button on the project header; the download is a `fetch → blob → object URL` (the JWT goes in the Authorization header, so a plain link would not authenticate).
+  - Deterministic footer states the governance rule: agents never write progress, dates or decisions.
+- **Consequence:** stakeholders get a shareable status report that always matches the database; no new service or migration, and Arabic content renders correctly.
+
+### ADR-020: Change management — approved items change only via audited change requests (M11)
+- **Status:** Approved
+- **Context:** After the PM approves a task it is locked — but real projects change: deadlines move, estimates grow, work is reassigned. The PM asked for proper change management (roadmap #3, "كبير"). Teammate Agent 4 plan-versions work is merged separately (ADR-021); no overlap with M11.
+- **Decision:**
+  - **New table `change_requests`** (migration `d9e4f7b2c5a3`, chained on the single head): project, kind (`task_update`), target task, a field-level **payload diff** (`before`/`after`, only fields that actually change), a stored **impact** (computed at proposal time), reason, status `draft|approved|rejected`, created_by/reviewed_by/at.
+  - **Deterministic impact analysis by code** (`analyze_task_change`): delaying an end date flags the delay; a **critical-path** task delay is high severity and notes the project end moves; **dependent tasks** (from `task_dependencies`) that would need their windows shifted are listed; pushing a start into the past is low; changing the estimate or assignee triggers a **capacity check** — the assignee's hours in the affected window vs their weekly capacity (high when over). Overall severity = worst finding. No LLM.
+  - **API (PM-only)**: `GET /projects/{pid}/changes[?status=]`, `POST /projects/{pid}/changes` (propose; draft tasks get 409 — they are edited in review, approved tasks only here), `POST /projects/{pid}/changes/{id}/decision` (approve applies the change and writes audit `change.decision` with the applied snapshot; reject closes it untouched; re-deciding is 409). Proposals write audit `change.proposed`.
+  - **Frontend**: a new **Changes** tab (chips: open / high-impact / applied) listing each request with its diff table, impact findings and Approve & apply / Reject buttons; approved tasks in the Work plan get a **"Change…"** button that opens a propose modal (title, estimate, dates, assignee, reason). Proposing jumps to the Changes tab with the computed impact in the notice.
+- **Consequence:** approved scope is never mutated silently — every change is proposed with its consequences, decided once, applied atomically and audited; agents still never write changes.
+
+### ADR-021: Plan approval gate + Agent 4 review (M6-B)
+- **Status:** Approved
+- **Context:** M6.1 stores Agent 3 output as a schedule draft that the PM approves. The teammate m6-B work adds the missing review layer: a versioned snapshot of the whole plan, an Agent 4 review that stores risks and rule findings, and one PM decision that approves the plan as a unit. Merging both flows required an explicit contract (see docs/plan-approval.md).
+- **Decision:**
+  - **plan_versions + risks tables** (migration `9d4e6a8c1b25`, re-chained on the single head after the merge): one open draft per project, immutable once decided, full JSON snapshot plus diff from the previous version.
+  - **Hybrid Agent 3 job:** one `agent3.schedule` run persists BOTH artifacts from the same Agent3Output - the M6.1 `schedule_draft` (PM approval writes task dates, unchanged) AND a draft `plan_version` that feeds Agent 4. It then queues `agent4.review` (one active review per project). Agents still never write task rows.
+  - **Agent 4 (LangGraph)** reviews the snapshot with tools and writes draft risks with evidence refs; deterministic plan rules may raise but never lower the agent verdict.
+  - **Plan gate (PM-only API):** approve/reject a plan version through a LangGraph interrupt; approval is the only path that promotes a version to approved. Checkpoint tables are created at runtime by the saver (no migration).
+- **Consequence:** the plan is reviewed and decided as a whole before execution, risks are stored and auditable, and the existing Schedule tab approval keeps working. Known integration debt: two approval paths can write dates; they should be unified in a later milestone.
+
 ## Decision Log
 
 | Date | Decision | Reason |
@@ -171,4 +211,7 @@ OCR; meeting recording/transcription; automatic external messages; one independe
 | 2026-11-17 | One-click accept-all + automatic agent chain; story-reject cascades to child tasks (ADR-015) | PM asked for accept-everything + auto-run Agents 2/3 with manual buttons kept; live chain e2e passes |
 | 2026-11-17 | PM command center: portfolio overview/resources/risks + PM assistant chat (ADR-016) | PM asked to manage all projects, resources and risks in one screen with a chatbot that suggests actions; live Groq chat e2e passes |
 | 2026-11-17 | Frontend polish: dark mode + Arabic/RTL (DOM translation) + SVG portfolio charts (ADR-017) | PM asked for a more professional dashboard; both toggles persist, charts are dependency-free |
-| 2026-11-14 | Plan approval gate + Agent 4 (ADR-018, see docs/plan-approval.md) | Agents draft, only the PM-gated writer approves; rules can raise but never lower the agent's verdict |
+| 2026-11-14 | Plan approval gate + Agent 4 (ADR-021, see docs/plan-approval.md) | Agents draft, only the PM-gated writer approves; rules can raise but never lower the agent's verdict |
+| 2026-11-18 | Delivery tracking: PM-only PATCH task progress + Gantt on Schedule tab (ADR-018) | PM asked for a Gantt + execution tracking; todo→0/done→100 rules, audited, portfolio auto-syncs |
+| 2026-11-18 | PDF export: server-side reportlab report with bundled Amiri font (ADR-019) | PM asked for PDF export; report mirrors the DB (no LLM), Arabic shaping handled |
+| 2026-11-18 | Change management: approved tasks change only via audited change requests with computed impact (ADR-020) | PM asked for proper change management ("كبير"); draft→decide flow with deterministic impact, applied changes audited |

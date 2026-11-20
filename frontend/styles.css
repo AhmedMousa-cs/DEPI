@@ -459,3 +459,57 @@ li { margin-bottom: 4px; }
 .pf-bar-track span { display: block; height: 100%; border-radius: 999px; transition: width .4s ease; }
 .pf-bar-row small { text-align: end; color: var(--ink-soft); }
 @media (max-width: 760px) { .pf-grid2 { grid-template-columns: 1fr; } }
+
+/* ===== M9: Gantt + delivery tracking ===== */
+.pf-gantt { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.pf-gantt-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.pf-gantt-row.overdue { border-color: var(--red); box-shadow: inset 3px 0 0 var(--red); }
+.pf-gantt-label { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.pf-gantt-label .project-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-gantt-label .row-meta { display: flex; gap: 6px; flex-wrap: wrap; }
+.pf-gantt-track {
+  grid-column: 1 / -1;
+  position: relative;
+  height: 26px;
+  background: var(--line);
+  border-radius: 999px;
+  overflow: visible;
+}
+.pf-gantt-bar {
+  position: absolute; inset-block: 0;
+  min-width: 22px;
+  border-radius: 999px;
+  background: var(--blue);
+  overflow: hidden;
+  display: flex; align-items: center;
+}
+.pf-gantt-bar.critical { background: var(--orange); }
+.pf-gantt-bar.done { background: var(--green); }
+.pf-gantt-row.overdue .pf-gantt-bar:not(.done) { outline: 2px dashed var(--red); outline-offset: -2px; }
+.pf-gantt-fill { display: block; height: 100%; background: rgba(255,255,255,.38); }
+.pf-gantt-pct {
+  position: absolute; inset-inline-end: 6px;
+  color: #fff; font-size: 11px; font-weight: 700; text-shadow: 0 1px 2px rgba(0,0,0,.35);
+}
+.pf-gantt-today {
+  position: absolute; top: -4px; bottom: -4px; width: 2px;
+  background: var(--red); opacity: .8; border-radius: 2px;
+}
+.pf-gantt-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
+.pf-progress-input {
+  width: 56px; padding: 5px 6px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--ink);
+  font: inherit; font-size: 12px; text-align: center;
+}
+@media (max-width: 700px) {
+  .pf-gantt-actions { flex-wrap: wrap; justify-content: flex-start; }
+}

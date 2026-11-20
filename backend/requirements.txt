@@ -20,3 +20,6 @@ langfuse>=3,<4
 langchain
 langchain-openai
 langchain-anthropic
+reportlab>=4
+arabic-reshaper
+python-bidi

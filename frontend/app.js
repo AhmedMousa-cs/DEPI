@@ -95,7 +95,15 @@ const AR = {
   "The AI assistant is available to the Project Manager.": "المساعد الذكي متاح لمدير المشروع.",
   "Plan review": "مراجعة الخطة",
   "Refresh": "تحديث",
-  "Run Agent 3 (new version)": "تشغيل Agent 3 (نسخة جديدة)",
+  "Run Agent 3 again": "تشغيل Agent 3 مرة أخرى",
+  "How it works": "إزاي الصفحة بتشتغل",
+  "1. Run Agent 3: it schedules the approved tasks and saves a draft version. 2. Agent 4 reviews that draft automatically and stores its risks. 3. Open the gate, then approve or reject the plan.": "١. شغّل Agent 3: يجدول المهام المعتمدة ويحفظ نسخة مسودة. ٢. Agent 4 يراجع المسودة تلقائيًا ويحفظ مخاطرها. ٣. افتح البوابة ثم اعتمد الخطة أو ارفضها.",
+  "Agent 3 builds the schedule from the approved tasks and saves a new draft version. Task dates are written only when you approve the plan.": "Agent 3 يبني الجدول من المهام المعتمدة ويحفظ نسخة مسودة جديدة. تواريخ المهام تُكتب فقط عند اعتماد الخطة.",
+  "Agent 3 needs an approved work plan first. Current status:": "Agent 3 محتاج خطة عمل معتمدة الأول. الحالة الحالية:",
+  "Run Agent 3 first - there is no draft to review.": "شغّل Agent 3 الأول — مفيش مسودة تراجعها.",
+  "Only a draft can be reviewed. This version is": "المسودة بس هي اللي تتراجع. النسخة دي",
+  "Ask Agent 4 to review the current draft again; it replaces the stored review.": "اطلب من Agent 4 يراجع المسودة الحالية تاني؛ المراجعة القديمة بتتستبدل.",
+  "Run Agent 3 again to create a new draft if you want another review.": "شغّل Agent 3 مرة أخرى لعمل مسودة جديدة لو عايز مراجعة تانية.",
   "Review with Agent 4": "مراجعة بواسطة Agent 4",
   "Working...": "جارٍ العمل...",
   "No plan versions yet": "لا توجد نُسخ خطة بعد",
@@ -966,7 +974,7 @@ Object.assign(actions, {
       await reloadChanges();
     }
     if (t.dataset.tab === "planreview") {
-      await reloadPlanReview();
+      await reloadPlanReview(true);
       try {
         const jobs = await api(`/projects/${state.project.id}/jobs`);
         const active = jobs.find(j => ["agent4.review", "agent3.schedule"].includes(j.type) && ["queued", "running"].includes(j.status));
@@ -1539,10 +1547,14 @@ const VERDICT_VIEW = { ready: ["Ready", "green"], needs_attention: ["Needs atten
 
 const pvBadge = s => `<span class="badge ${s === "approved" ? "green" : s === "rejected" ? "red" : s === "draft" ? "blue" : ""}">${esc(t(PV_LABEL[s] || s))}</span>`;
 
-async function reloadPlanReview() {
+async function reloadPlanReview(preferDraft = false) {
   const id = state.project.id;
   const versions = await api(`/projects/${id}/plan/versions`).catch(e => { if (e.message === "unauthorized") throw e; return []; });
   state.planVersions = versions;
+  if (preferDraft) {
+    const draft = versions.find(v => v.status === "draft");
+    if (draft) state.planVersionSel = draft.version;
+  }
   if (!versions.some(v => v.version === state.planVersionSel)) {
     const draft = versions.find(v => v.status === "draft");
     state.planVersionSel = draft ? draft.version : (versions[0] ? versions[0].version : null);
@@ -1564,9 +1576,19 @@ function pollPlanReviewJob(jobId) {
       const j = await api(`/jobs/${jobId}`);
       state.planReviewJob = j;
       const finished = ["done", "failed", "cancelled", "waiting_for_pm"].includes(j.status);
-      if (finished) clearInterval(planReviewTimer);
+      if (finished) {
+        clearInterval(planReviewTimer);
+        // Agent 3 queues an agent4.review when it finishes: keep the screen following it.
+        if (j.type === "agent3.schedule" && j.status === "done") {
+          try {
+            const jobs = await api(`/projects/${state.project.id}/jobs`);
+            const next = jobs.find(x => x.type === "agent4.review" && ["queued", "running"].includes(x.status));
+            if (next) { state.planReviewJob = next; pollPlanReviewJob(next.id); return; }
+          } catch (e) { if (e.message === "unauthorized") throw e; }
+        }
+      }
       if (state.page === "project" && state.tab === "planreview") {
-        if (finished) { await reloadPlanReview(); await reloadProject(); }
+        if (finished) { await reloadPlanReview(true); await reloadProject(); }
         if (!state.modal) render();
       }
     } catch (e) { clearInterval(planReviewTimer); }
@@ -1611,8 +1633,18 @@ function planReviewView() {
   const job = state.planReviewJob;
   const running = job && ["queued", "running"].includes(job.status);
   const openable = ["planning", "plan_review", "active"].includes(state.project.status);
+  const canReview = !!d && d.status === "draft";
+  const genHint = openable
+    ? t("Agent 3 builds the schedule from the approved tasks and saves a new draft version. Task dates are written only when you approve the plan.")
+    : t("Agent 3 needs an approved work plan first. Current status:") + " " + t(STATUS[state.project.status] || state.project.status);
+  const reviewHint = !d
+    ? t("Run Agent 3 first - there is no draft to review.")
+    : !canReview
+      ? t("Only a draft can be reviewed. This version is") + " " + t(PV_LABEL[d.status] || d.status) + "."
+      : t("Ask Agent 4 to review the current draft again; it replaces the stored review.");
   const jobLine = job ? `<div class="callout${job.status === "failed" ? " warning" : ""}">${t("Agent job")} #${esc(job.id)} (${esc(job.type)}): <b>${esc(job.status)}</b> (${esc(job.progress)}%)${job.error ? "<br>" + esc(job.error) : ""}</div>` : "";
-  const head = `<div class="page-head"><div><div class="eyebrow">M6-B · Agent 4</div><h1>${t("Plan review")}</h1><p>${t("One versioned snapshot of the whole plan. Agent 4 stores risks and findings; the PM approves or rejects the plan as a unit through the gate.")}</p></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-secondary btn-small" data-action="plan-refresh">${t("Refresh")}</button><button class="btn btn-secondary btn-small" data-action="plan-generate"${running || !openable ? " disabled" : ""}>${t("Run Agent 3 (new version)")}</button><button class="btn btn-primary btn-small" data-action="plan-review"${running || !d || d.status !== "draft" ? " disabled" : ""}>${running ? t("Working...") : t("Review with Agent 4")}</button></div></div>`;
+  const steps = `<div class="callout" style="margin-top:10px"><b>${t("How it works")}</b><br>${t("1. Run Agent 3: it schedules the approved tasks and saves a draft version. 2. Agent 4 reviews that draft automatically and stores its risks. 3. Open the gate, then approve or reject the plan.")}</div>`;
+  const head = `<div class="page-head"><div><div class="eyebrow">M6-B · Agent 4</div><h1>${t("Plan review")}</h1><p>${t("One versioned snapshot of the whole plan. Agent 4 stores risks and findings; the PM approves or rejects the plan as a unit through the gate.")}</p>${steps}</div><div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end"><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-secondary btn-small" data-action="plan-refresh">${t("Refresh")}</button><button class="btn btn-secondary btn-small" data-action="plan-generate"${running || !openable ? " disabled" : ""} title="${esc(genHint)}">${t(versions.length ? "Run Agent 3 again" : "Run Agent 3")}</button><button class="btn btn-primary btn-small" data-action="plan-review"${running || !canReview ? " disabled" : ""} title="${esc(reviewHint)}">${running ? t("Working...") : t("Review with Agent 4")}</button></div><p class="subtle" style="max-width:320px;text-align:end;margin:0">${esc(reviewHint)}</p></div></div>`;
   if (!versions.length) return `${head}${jobLine}<section class="card"><div class="card-body"><div class="empty"><div class="empty-icon">◈</div><h3>${t("No plan versions yet")}</h3><p>${t("Approve the work plan tasks, then run Agent 3 — each run persists a draft version that Agent 4 reviews.")}</p></div></div></section>`;
 
   const versionChips = versions.map(v => `<button class="btn ${state.planVersionSel === v.version ? "btn-primary" : "btn-secondary"} btn-small" data-action="plan-version" data-v="${v.version}">v${esc(v.version)} · ${t(PV_LABEL[v.status] || v.status)}</button>`).join(" ");
@@ -1629,7 +1661,7 @@ function planReviewView() {
   const draft = d.status === "draft";
 
   const gateActions = !draft
-    ? `<div class="callout">${d.status === "approved" ? t("This plan is approved. Its snapshot dates are live on the tasks.") : t("This version was rejected. Nothing was written to the tasks.")}</div>`
+    ? `<div class="callout">${d.status === "approved" ? t("This plan is approved. Its snapshot dates are live on the tasks.") : t("This version was rejected. Nothing was written to the tasks.")} ${t("Run Agent 3 again to create a new draft if you want another review.")}</div>`
     : `<div class="item-actions" style="margin-top:12px;flex-wrap:wrap">${gateState === "waiting_for_pm"
         ? `<button class="btn btn-primary" data-action="plan-approve">${t("Approve plan")}</button><button class="btn btn-secondary" data-action="plan-reject">${t("Reject plan")}</button>`
         : `<button class="btn btn-primary" data-action="plan-open-gate"${openable ? "" : " disabled"}>${t("Open approval gate")}</button>`}</div>
@@ -1671,7 +1703,7 @@ function planGateModal() {
 }
 
 Object.assign(actions, {
-  "plan-refresh": async () => { await reloadPlanReview(); await reloadProject(); render(); },
+  "plan-refresh": async () => { await reloadPlanReview(true); await reloadProject(); render(); },
   "plan-version": async el => { state.planVersionSel = Number(el.dataset.v); await reloadPlanReview(); render(); },
   "plan-generate": async () => {
     if (!confirm(t("Run Agent 3? A new draft plan version is stored and Agent 4 reviews it next. Task dates are written only when you approve the plan."))) return;

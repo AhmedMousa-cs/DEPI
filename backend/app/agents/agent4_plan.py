@@ -162,7 +162,7 @@ def run_agent4(
             try:
                 agent = build_agent4(model, store, summarizer=summarizer, audit_sink=audit_sink, budget_tokens=budget)
                 agent.invoke({"messages": [HumanMessage(TASK_MESSAGE)]}, context=ctx,
-                             config={"recursion_limit": 40})
+                             config={"recursion_limit": settings.agent4_max_graph_steps})
             except AgentBudgetStop as exc:
                 stopped = "budget"
                 log.warning("agent4 stopped: %s", exc)

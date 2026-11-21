@@ -1,0 +1,65 @@
+{
+  "model": "openai/gpt-oss-120b",
+  "prompt_version": "agent4_v1",
+  "rows": [
+    {
+      "scenario": "double_booked",
+      "tool_correctness": 0.8571428571428571,
+      "success": true,
+      "tools_called": [
+        "get_agent3_results",
+        "get_project_brief",
+        "get_tasks_and_dependencies",
+        "get_team_capacity",
+        "save_draft_risks",
+        "save_plan_review"
+      ],
+      "reads_return_expected_data": true,
+      "risk_saves_accepted": 1,
+      "verdict": "needs_attention",
+      "review_source": "agent4",
+      "stopped": null,
+      "tokens": 17344
+    },
+    {
+      "scenario": "deadline_blown",
+      "tool_correctness": 1.0,
+      "success": true,
+      "tools_called": [
+        "get_agent3_results",
+        "get_open_risks",
+        "get_project_brief",
+        "get_tasks_and_dependencies",
+        "get_team_capacity",
+        "save_draft_risks",
+        "save_plan_review"
+      ],
+      "reads_return_expected_data": true,
+      "risk_saves_accepted": 1,
+      "verdict": "needs_attention",
+      "review_source": "agent4",
+      "stopped": null,
+      "tokens": 21004
+    },
+    {
+      "scenario": "clean_plan",
+      "tool_correctness": 1.0,
+      "success": true,
+      "tools_called": [
+        "get_agent3_results",
+        "get_open_risks",
+        "get_project_brief",
+        "get_tasks_and_dependencies",
+        "get_team_capacity",
+        "save_draft_risks",
+        "save_plan_review"
+      ],
+      "reads_return_expected_data": true,
+      "risk_saves_accepted": 1,
+      "verdict": "needs_attention",
+      "review_source": "agent4",
+      "stopped": null,
+      "tokens": 21862
+    }
+  ]
+}

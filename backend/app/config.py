@@ -51,10 +51,11 @@ class Settings(BaseSettings):
     llm_require_pricing: bool = False
 
     # Agent 4 (plan review) - the agent loop's guard rails
-    agent4_summary_trigger_tokens: int = 3500  # SummarizationMiddleware kicks in above this
-    agent4_summary_keep_messages: int = 6
+    agent4_summary_trigger_tokens: int = 60000  # one review reports ~8-12k tokens; a lower trigger summarises mid-run and restarts it
+    agent4_summary_keep_messages: int = 12
     agent4_max_model_calls: int = 12
     agent4_max_tool_calls: int = 20
+    agent4_max_graph_steps: int = 120  # one turn (middleware + model + tools) costs several graph steps; 40 cut real reviews off
 
     # Langfuse
     langfuse_public_key: str | None = None

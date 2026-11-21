@@ -1,0 +1,91 @@
+{
+  "golden": "project-c",
+  "version": 1,
+  "purpose": "Agent 3 (deterministic scheduling) and Agent 4 (rule-based risks): a plan whose dates, critical path, one resource conflict and rule verdict are known in advance. No LLM is needed to check it.",
+  "sources": [
+    {"source_id": 1, "kind": "brief", "file": "project-c-brief.md"},
+    {"source_id": 2, "kind": "transcript", "file": "project-c-transcript.txt"}
+  ],
+  "requirements": [
+    {"requirement_id": 1, "id": "C01", "type": "functional", "priority": "high", "text": "Customers can register, sign in and save an address", "source_id": 2, "exact_quote": "I want to pick a service, see the price and book a two-hour slot."},
+    {"requirement_id": 2, "id": "C02", "type": "functional", "priority": "high", "text": "Customers can book a service with a time slot and pay by card", "source_id": 2, "exact_quote": "I pay by card when I book, and I must see the technician's name and rating."},
+    {"requirement_id": 3, "id": "C03", "type": "functional", "priority": "high", "text": "Dispatchers can assign the nearest available technician and flag jobs nobody can take", "source_id": 2, "exact_quote": "I need a queue of unassigned jobs and one click to assign the nearest available technician."},
+    {"requirement_id": 4, "id": "C04", "type": "functional", "priority": "high", "text": "Technicians can accept a job and move it through on the way, working and done", "source_id": 2, "exact_quote": "I accept, tap on my way, working and done, and I need the address and customer notes on the same screen."},
+    {"requirement_id": 5, "id": "C05", "type": "functional", "priority": "medium", "text": "Customers can rate the technician after the job", "source_id": 2, "exact_quote": "reviews ship with the first release"},
+    {"requirement_id": 6, "id": "C06", "type": "functional", "priority": "high", "text": "Admins can see daily jobs, revenue and technician load", "source_id": 2, "exact_quote": "Only an admin may see revenue"},
+    {"requirement_id": 7, "id": "C07", "type": "non_functional", "priority": "high", "text": "Roles are enforced on the server and card data is never stored", "source_id": 2, "exact_quote": "every role check must be enforced on the server, not in the app. Card data must never be stored on our servers."},
+    {"requirement_id": 8, "id": "C08", "type": "non_functional", "priority": "high", "text": "The first release is live by 1 December 2026", "source_id": 2, "exact_quote": "FixMate's first release must be live by Tuesday, 1 December 2026."}
+  ],
+  "stories": [
+    {"ref": "S1", "requirement_id": 1, "order": 1, "text": "As a customer I can register, sign in and save my address", "match_terms": ["register", "address"], "acceptance_criteria": ["A new account is created with a valid email.", "An address can be saved and edited before booking."]},
+    {"ref": "S2", "requirement_id": 2, "order": 2, "text": "As a customer I can book a service slot and pay by card", "match_terms": ["book", "slot", "pay"], "acceptance_criteria": ["Only free slots for the chosen service are offered.", "A card payment is confirmed before the booking exists."]},
+    {"ref": "S3", "requirement_id": 3, "order": 3, "text": "As a dispatcher I can assign the nearest available technician", "match_terms": ["assign", "nearest"], "acceptance_criteria": ["Unassigned jobs are listed oldest first.", "A job nobody can take is flagged, never dropped."]},
+    {"ref": "S4", "requirement_id": 4, "order": 4, "text": "As a technician I can accept a job and update its status from my phone", "match_terms": ["accept", "status"], "acceptance_criteria": ["Status moves on the way, working, done.", "The address and notes are on the status screen."]},
+    {"ref": "S5", "requirement_id": 5, "order": 5, "text": "As a customer I can rate the technician after the job is done", "match_terms": ["rate", "review"], "acceptance_criteria": ["Rating is only possible on a done job.", "The rating appears on the technician profile."]},
+    {"ref": "S6", "requirement_id": 6, "order": 6, "text": "As an admin I can see daily jobs, revenue and technician load", "match_terms": ["daily", "revenue"], "acceptance_criteria": ["The dashboard shows today's jobs and revenue.", "Technician load is shown per person."]},
+    {"ref": "S7", "requirement_id": 7, "order": 7, "text": "As the platform owner I enforce roles on the server and never store card data", "match_terms": ["role", "card"], "acceptance_criteria": ["A non-admin cannot read revenue.", "No card number is stored in the database."]},
+    {"ref": "S8", "requirement_id": 8, "order": 8, "text": "As the project sponsor I get the first release live by 1 December 2026", "match_terms": ["release", "december"], "acceptance_criteria": ["The release is deployed and monitored before the pilot.", "A go-live checklist is signed off by the PM."]}
+  ],
+  "tasks": [
+    {"ref": "T1", "story_ref": "S1", "order": 1, "title": "Build auth and role-based access API", "match_terms": ["auth", "role"], "estimate_hours": 16, "is_critical": true, "rationale": "Every other feature needs a signed-in user; nothing can ship before this exists.", "depends_on": [], "assignee_ref": "M1"},
+    {"ref": "T2", "story_ref": "S2", "order": 1, "title": "Build booking flow API", "match_terms": ["booking", "api"], "estimate_hours": 24, "is_critical": true, "rationale": "Dispatch, payments and the technician app all hang off a created booking.", "depends_on": ["T1"], "assignee_ref": "M1"},
+    {"ref": "T3", "story_ref": "S2", "order": 2, "title": "Build customer booking screens", "match_terms": ["screen", "booking"], "estimate_hours": 20, "is_critical": false, "rationale": "Turns the booking API into something a customer can actually use.", "depends_on": ["T1"], "assignee_ref": "M2"},
+    {"ref": "T4", "story_ref": "S3", "order": 1, "title": "Build dispatch and nearest-technician engine", "match_terms": ["dispatch", "technician"], "estimate_hours": 32, "is_critical": true, "rationale": "The core of the marketplace: without assignment the booking never reaches a technician.", "depends_on": ["T2"], "assignee_ref": "M3"},
+    {"ref": "T5", "story_ref": "S2", "order": 3, "title": "Integrate card payments and invoicing", "match_terms": ["payment", "invoice"], "estimate_hours": 24, "is_critical": false, "rationale": "Money is taken at booking, so it can start as soon as the booking API exists.", "depends_on": ["T2"], "assignee_ref": "M3"},
+    {"ref": "T6", "story_ref": "S4", "order": 1, "title": "Build technician app job status flow", "match_terms": ["technician", "status"], "estimate_hours": 16, "is_critical": true, "rationale": "The technician cannot start work until the assigned job reaches the phone.", "depends_on": ["T4"], "assignee_ref": "M2"},
+    {"ref": "T7", "story_ref": "S6", "order": 1, "title": "Build admin dashboard for jobs, revenue and load", "match_terms": ["dashboard", "revenue"], "estimate_hours": 20, "is_critical": false, "rationale": "Needs both dispatched jobs and paid bookings to show daily numbers.", "depends_on": ["T4", "T5"], "assignee_ref": "M1"},
+    {"ref": "T8", "story_ref": "S5", "order": 1, "title": "Build ratings and reviews", "match_terms": ["rating", "review"], "estimate_hours": 12, "is_critical": true, "rationale": "A review only exists after a done job, so it follows the technician status flow.", "depends_on": ["T6"], "assignee_ref": "M2"},
+    {"ref": "T9", "story_ref": "S7", "order": 1, "title": "Add server-side role enforcement and card-data hardening", "match_terms": ["role", "card"], "estimate_hours": 16, "is_critical": false, "rationale": "Protects every API built above and closes admin-only revenue access.", "depends_on": ["T1"], "assignee_ref": "M3"},
+    {"ref": "T10", "story_ref": "S8", "order": 1, "title": "Deploy the release and set up monitoring", "match_terms": ["deploy", "monitoring"], "estimate_hours": 12, "is_critical": true, "rationale": "The pilot cannot start until the finished app is deployed and observed.", "depends_on": ["T7", "T8", "T9"], "assignee_ref": "M4"}
+  ],
+  "scheduling": {
+    "project_start": "2026-11-16",
+    "target_end": "2026-12-01",
+    "team": [
+      {"id": "1", "ref": "M1", "name": "Omar Hassan", "role_title": "Backend engineer", "capacity_hours_per_week": 40},
+      {"id": "2", "ref": "M2", "name": "Nour Adel", "role_title": "Mobile engineer", "capacity_hours_per_week": 40},
+      {"id": "3", "ref": "M3", "name": "Sara Fathy", "role_title": "Full-stack engineer", "capacity_hours_per_week": 40},
+      {"id": "4", "ref": "M4", "name": "Adel Mostafa", "role_title": "DevOps engineer", "capacity_hours_per_week": 40}
+    ],
+    "expected": {
+      "total_duration_days": 15,
+      "project_end": "2026-12-04",
+      "critical_path": ["T1", "T2", "T4", "T6", "T8", "T10"],
+      "task_dates": {
+        "T1": ["2026-11-16", "2026-11-17"],
+        "T2": ["2026-11-18", "2026-11-20"],
+        "T3": ["2026-11-18", "2026-11-20"],
+        "T4": ["2026-11-23", "2026-11-26"],
+        "T5": ["2026-11-23", "2026-11-25"],
+        "T6": ["2026-11-27", "2026-11-30"],
+        "T7": ["2026-11-27", "2026-12-01"],
+        "T8": ["2026-12-01", "2026-12-02"],
+        "T9": ["2026-11-18", "2026-11-19"],
+        "T10": ["2026-12-03", "2026-12-04"]
+      },
+      "conflicts": [
+        {
+          "kind": "overallocation",
+          "assignee_id": "3",
+          "task_ids": ["T4", "T5"],
+          "start_date": "2026-11-23",
+          "end_date": "2026-11-25",
+          "overload_ratio": 2.0
+        }
+      ],
+      "rule_risks": ["deadline_exceeded", "resource_conflict"],
+      "verdict": "needs_attention"
+    }
+  },
+  "thresholds": {
+    "story_coverage": 0.9,
+    "story_recall": 0.7,
+    "task_recall": 0.6,
+    "acceptance_criteria": 1.0,
+    "total_hours_ratio": 0.5,
+    "ordering": true,
+    "priority_first": true,
+    "critical_path": true,
+    "rationale": true
+  }
+}

@@ -8,6 +8,7 @@ Results go to evals/results/agent4_tool_correctness.json.
 """
 import json
 import sys
+import time
 from pathlib import Path
 
 from evals.agent4_harness import called_tools, evaluate, expected_reads, make_metric, run_scenario  # noqa: F401
@@ -31,6 +32,26 @@ def scenarios():
     }
 
 
+RATE_LIMIT_WAITS = (20, 45, 90)
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return "429" in text or "rate limit" in text or "tokens per minute" in text
+
+
+def run_with_retry(name: str, fn):
+    """Groq's free tier allows 8k tokens/minute; one review can exceed that in a single burst."""
+    for attempt, wait in enumerate(RATE_LIMIT_WAITS, start=1):
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001
+            if not _is_rate_limit(exc) or attempt == len(RATE_LIMIT_WAITS):
+                raise
+            print(f"{name}: rate limited, retrying in {wait}s", flush=True)
+            time.sleep(wait)
+
+
 def main() -> int:
     if not settings.groq_api_key and not settings.anthropic_api_key and settings.llm_provider != "ollama":
         print("No LLM configured (GROQ_API_KEY / ANTHROPIC_API_KEY / ollama).")
@@ -38,7 +59,7 @@ def main() -> int:
     model = get_langchain_model()
     rows = []
     for name, snap in scenarios().items():
-        result, store = run_scenario(snap, model=model)
+        result, store = run_with_retry(name, lambda: run_scenario(snap, model=model))
         reads = expected_reads(snap, InMemoryPlanStore(snap))
         expected = reads + [ToolCall(name=n, input_parameters={}, output=None) for n in WRITES]
         got = called_tools(result.tool_calls)
@@ -60,6 +81,7 @@ def main() -> int:
                      "review_source": result.review_source, "stopped": result.stopped_reason,
                      "tokens": result.tokens_in + result.tokens_out})
         print(rows[-1])
+        time.sleep(5)  # stay under the provider's tokens-per-minute window between scenarios
     RESULTS.parent.mkdir(exist_ok=True)
     RESULTS.write_text(json.dumps({"model": settings.model_llm, "prompt_version": "agent4_v1", "rows": rows}, indent=2))
     print("saved", RESULTS)

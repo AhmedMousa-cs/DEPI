@@ -47,6 +47,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--golden", required=True)
     ap.add_argument("--mode", choices=["llm", "oracle"], default="llm")
+    ap.add_argument("--extractor", choices=["agent1", "baseline"], default="agent1", help="agent1 = the real Agent 1 (default); baseline = old v0 prompt")
     ap.add_argument("--max-attempts", type=int, default=None)
     ap.add_argument("--strict", action="store_true", help="exit 1 if any threshold fails")
     args = ap.parse_args()
@@ -63,7 +64,10 @@ def main() -> int:
         items = oracle_items(expected)
     else:
         try:
-            from evals.baseline_extractor import extract
+            if args.extractor == "agent1":
+                from evals.agent1_real import extract
+            else:
+                from evals.baseline_extractor import extract
 
             items, meta = extract(source_list, args.max_attempts)
             meta["mode"] = "llm"

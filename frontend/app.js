@@ -1023,6 +1023,9 @@ Object.assign(actions, {
   "accept-all": async () => {
     const id = state.project.id;
     if (!confirm("Accept everything?\n\n1. All draft requirements are approved\n2. The scope is approved\n3. The LLM coverage analysis runs\n4. Agent 2 generates the plan and all its drafts are approved\n5. Agent 3 computes the schedule draft\n\nYou still review and approve the schedule yourself — that is what writes the dates.")) return;
+    // Only switch to the schedule at the end if the PM stayed where they started.
+    // Moving them while they read another tab is disorienting; the notice is enough.
+    const startedTab = state.tab;
     state.chain = "Approving requirements..."; render();
     try {
       const drafts = state.reqs.filter(r => r.status === "draft").map(r => r.id);
@@ -1054,7 +1057,8 @@ Object.assign(actions, {
       const j3 = await post(`/projects/${id}/jobs`, { type: "agent3.schedule" });
       state.scheduleJob = j3; await waitForJob(j3.id);
       await reloadSchedule();
-      state.chain = null; state.tab = "schedule";
+      state.chain = null;
+      if (state.page === "project" && state.project && state.project.id === id && state.tab === startedTab) state.tab = "schedule";
       state.notice = { type: "ok", text: "Everything is ready — review the schedule draft and approve it to write the dates." };
       render();
     } catch (e) {

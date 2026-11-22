@@ -1302,11 +1302,17 @@ function ganttView() {
     .filter(t => t.review_status === "approved" && t.start && t.end)
     .sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : a.id - b.id));
   if (!rows.length) return "";
-  const today = new Date().toISOString().slice(0, 10);
+  const DAY = 86400000;
+  const at = v => Date.parse(v + "T00:00:00Z");
+  const shift = (v, days) => new Date(at(v) + days * DAY).toISOString().slice(0, 10);
+  const now = new Date();
+  const today = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0") + "-" + String(now.getDate()).padStart(2, "0");
   const min = rows.reduce((m, t) => t.start < m ? t.start : m, rows[0].start);
   const max = rows.reduce((m, t) => t.end > m ? t.end : m, rows[0].end);
-  const span = Math.max(1, (new Date(max + "T12:00:00") - new Date(min + "T12:00:00")) / 86400000);
-  const pos = v => Math.max(0, Math.min(100, Math.round(100 * (new Date(v + "T12:00:00") - new Date(min + "T12:00:00")) / 86400000 / span)));
+  // End dates are inclusive: the chart must cover min .. max+1 so a task on the
+  // last day still gets a full slot instead of a 2% sliver at the edge.
+  const span = Math.max(DAY, at(shift(max, 1)) - at(min));
+  const pos = v => Math.max(0, Math.min(100, 100 * (at(v) - at(min)) / span));
   const doneH = rows.reduce((n, t) => n + Number(t.estimate_hours || 0) * (t.status === "done" ? 1 : (t.progress_pct || 0) / 100), 0);
   const totalH = rows.reduce((n, t) => n + Number(t.estimate_hours || 0), 0);
   const overall = totalH ? Math.round(100 * doneH / totalH) : 0;
@@ -1315,7 +1321,7 @@ function ganttView() {
 
   const rowsHtml = rows.map(task => {
     const t = task;
-    const left = pos(t.start), width = Math.max(2, pos(t.end) - left);
+    const left = pos(t.start), width = Math.max(0.8, pos(shift(t.end, 1)) - left);
     const pct = t.status === "done" ? 100 : (t.progress_pct || 0);
     const overdue = t.end < today && t.status !== "done";
     const cls = t.status === "done" ? "done" : t.is_critical ? "critical" : "";

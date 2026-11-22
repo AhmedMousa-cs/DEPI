@@ -66,6 +66,16 @@ def _p(text, size=9, color=C_INK, bold=False, align=None) -> Paragraph:
     return Paragraph(_fix(text), style)
 
 
+def _gantt_span_days(min_d: date, max_d: date) -> int:
+    """Inclusive window: a task on the last day still occupies one full slot."""
+    return max(1, (max_d + timedelta(days=1) - min_d).days)
+
+
+def _gantt_fraction(d: date, min_d: date, max_d: date) -> float:
+    """Position of ``d`` inside the inclusive window, 0 at the first day and 1 after the last."""
+    return (d - min_d).days / _gantt_span_days(min_d, max_d)
+
+
 def _gantt_flowable(rows, min_d, max_d, today, width=178 * mm):
     """Rows: dicts {title, start, end, status, pct, critical, overdue}. Deterministic CPM window."""
     if not rows:
@@ -73,7 +83,6 @@ def _gantt_flowable(rows, min_d, max_d, today, width=178 * mm):
     label_w = 62 * mm
     track_w = width - label_w
     row_h = 7 * mm
-    total_days = max(1, (max_d - min_d).days)
     h = row_h * len(rows) + 6 * mm
 
     class _Gantt(Flowable):
@@ -82,7 +91,7 @@ def _gantt_flowable(rows, min_d, max_d, today, width=178 * mm):
             self.width, self.height = width, h
 
         def _x(self, d):
-            frac = (d - min_d).days / total_days
+            frac = _gantt_fraction(d, min_d, max_d)
             return label_w + frac * track_w
 
         def draw(self):

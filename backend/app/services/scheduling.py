@@ -73,7 +73,7 @@ def approve_schedule(
     }
 
     if decision == "approved":
-        dates = {str(t["id"]): (t["start_date"], t["end_date"]) for t in draft.payload["schedule"]["tasks"]}
+        scheduled = {str(t["id"]): t for t in draft.payload["schedule"]["tasks"]}
         tasks = db.scalars(select(Task).where(Task.project_id == draft.project_id)).all()
         written = 0
         for task in tasks:
@@ -82,10 +82,12 @@ def approve_schedule(
             # note: locked_by_pm is set by ANY PM decision (incl. plain approval) and only stops
             # agents from overwriting PM-reviewed content on re-runs. Approving the schedule IS
             # the PM decision that authorizes these dates, so approved tasks are dated.
-            got = dates.get(str(task.id))
+            got = scheduled.get(str(task.id))
             if got is None:
                 continue  # task created after the draft: it simply has no date yet
-            task.start, task.end = date.fromisoformat(got[0]), date.fromisoformat(got[1])
+            task.start = date.fromisoformat(got["start_date"])
+            task.end = date.fromisoformat(got["end_date"])
+            task.is_critical = bool(got.get("is_critical"))  # the Gantt and the PDF read this flag
             written += 1
     else:
         written = 0

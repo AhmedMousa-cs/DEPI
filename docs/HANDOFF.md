@@ -41,6 +41,7 @@ M6-B (plan approval gate + Agent 4: plan_versions/risks, LangGraph review, PM-on
 - [x] Content mirrors the app: header + summary (health, hours-weighted progress, window, next deadline, task counts, pending drafts, overdue), drawn Gantt (same colors/logic as M9 UI, today line), full tasks table, project risks with suggested actions, governance footer
 - [x] Frontend "⬇ Export PDF" on the project header (PM only): fetch → blob → download (JWT in the header, so a plain link would not authenticate); verified live on project 14 (36.8KB, starts with %PDF-); Arabic notice strings included
 - [x] Small robustness fix found during verification: project header now guards `p.sources` before the reload completes
+- [x] Gantt geometry fix (2026-11-22): the PDF now uses the same inclusive end-date window as the UI (`max(end)+1 day`), so a task on the last day gets a full slot instead of a clamped sliver; `_gantt_span_days`/`_gantt_fraction` are unit-tested (2 one-day tasks = 50% each on a two-day window)
 
 ## M9 evidence (delivery tracking + Gantt)
 - [x] Backend: `PATCH /projects/{pid}/tasks/{tid}/progress` PM-only; `todo → 0%`, `done → 100%`, `in_progress` keeps/sets the percent; draft task 409, unknown 404, non-PM 403; audit `task.progress` with before/after — **6/6 new tests pass** (`tests/test_delivery_progress.py`); service `app/services/delivery.py`
@@ -50,6 +51,7 @@ M6-B (plan approval gate + Agent 4: plan_versions/risks, LangGraph review, PM-on
 - [x] Per-row delivery controls (Todo / ▶ Start / Done + % input) call the PATCH and re-render; summary chips: hours-weighted overall %, done/total, in progress, overdue
 - [x] Verified live in the browser (project 14 "مدرسه", 11 dated approved tasks): Start → In progress 0%, % → 45% (chips: 5% overall), Done → 100% green (chips: 12% overall, 1/11); Arabic RTL Gantt fully translated ("مخطط جانت — تتبع التنفيذ", "مكتملة", dates "17 نوفمبر 2026"); dark mode colors follow the CSS variables; zero console errors
 - [x] Portfolio auto-sync with zero extra code: after the Done click the command-center card for "مدرسه" showed 12% · 1/11 tasks done; audit rows 341-343 show the full before/after chain (todo 0 → in_progress 45 → done 100)
+- [x] Gantt geometry fix (2026-11-22): end dates are inclusive, so the chart covers `min .. max+1` and a one-day task fills its slot (before, two one-day tasks rendered as a 2% sliver plus a bar pushed off the track); `today` now uses the local date, not the UTC one; approving a schedule writes `is_critical` too, so the orange critical bars work through both approval paths — verified live (project 8: 50% + 50% bars) and in `test_agent3_job.py`
 
 ## M8 evidence (frontend polish)
 - [x] `node --check` passes; verified in a real browser: both toggles persist across a reload (`nx-theme`, `nx-lang` in localStorage)

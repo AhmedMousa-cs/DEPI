@@ -144,6 +144,9 @@ def test_pm_approval_writes_dates_including_edited_tasks(monkeypatch):
     also_dated = next(t for t in now if t["id"] == edited["id"])
     assert dated["start"] is not None and dated["end"] is not None
     assert dated["end"] >= dated["start"]
+    # the CPM verdict travels with the dates, so the Gantt can draw critical bars
+    scheduled = {str(t["id"]): t for t in resp.json()["payload"]["schedule"]["tasks"]}
+    assert dated["is_critical"] is scheduled[str(free["id"])]["is_critical"]
     # a PM-edited task keeps its own decision but still gets its dates from the approved schedule
     assert also_dated["start"] is not None and also_dated["locked_by_pm"] is True
 

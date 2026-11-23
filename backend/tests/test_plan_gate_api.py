@@ -467,5 +467,5 @@ def test_only_plan_approval_sets_a_plan_version_to_approved():
             is_kw = isinstance(node, ast.keyword) and node.arg == "status"
             value = node.value if (is_attr or is_kw) else None
             if isinstance(value, ast.Constant) and value.value == "approved":
-                setters.append(str(f.relative_to(root)))
+                setters.append(f.relative_to(root).as_posix())
     assert sorted(set(setters)) == ["services/plan_approval.py"]

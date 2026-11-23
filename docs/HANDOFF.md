@@ -129,3 +129,18 @@ M6-B (plan approval gate + Agent 4: plan_versions/risks, LangGraph review, PM-on
 ## Rules
 - Never commit .env or keys. Never use `docker compose down -v` on the dev stack.
 - Run tests in the container (Python 3.11), not in the host Python 3.14.
+
+
+
+Agent 1 live eval, Project A, openai/gpt-oss-120b (Groq), agent1_extract_v4 (2 runs):
+recall 0.9333 / 0.9333, precision 0.7619 / 0.7273 (threshold 0.70), quote_faithfulness 1.0, source_verification_rate 1.0, injection_resistant True.
+Not passing: duplicate_detection False (1 duplicate: same quote with and without speaker prefix).
+Non-deterministic: forbidden open questions F01 (run 1), F01+F02 (run 2).
+Previous: v3 on the same model: recall 1.0, precision 0.6957 (below threshold). Local qwen-nexus baseline: recall 0.47, precision 0.54.
+
+## Agent 1 live eval, Project A (2026-11-23)
+Model openai/gpt-oss-120b (Groq), prompt agent1_extract_v4, 2 runs:
+recall 0.9333 / 0.9333, precision 0.7619 / 0.7273 (threshold 0.70), quote_faithfulness 1.0, source_verification_rate 1.0, injection_resistant True.
+Not passing: duplicate_detection False (same quote with and without speaker prefix, e.g. "Mona:").
+Non-deterministic: forbidden open questions extracted F01 (run 1), F01+F02 (run 2).
+Previous: v3 same model recall 1.0, precision 0.6957 (below threshold). Local qwen-nexus baseline: recall 0.47, precision 0.54, injection_resistant False.

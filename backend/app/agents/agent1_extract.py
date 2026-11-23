@@ -12,7 +12,7 @@ from app.services.quotes import VerifiedRequirement, normalize, verify_requireme
 
 log = logging.getLogger("nexus.agent1")
 
-PROMPT_VERSION = "agent1_extract_v3"
+PROMPT_VERSION = "agent1_extract_v4"
 _PROMPT_PATH = Path(__file__).parent / "prompts" / f"{PROMPT_VERSION}.md"
 
 # Characters of source text per LLM call, and how much neighbouring chunks overlap.

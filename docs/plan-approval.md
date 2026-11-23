@@ -42,10 +42,15 @@ PM  POST /plan/generate ──► job agent3.schedule ──► DRAFT plan versi
 | GET | `/projects/{id}/plan/risks?status=` | risks (`draft`, `open`, `dismissed`, `superseded`) |
 
 ## Agent 4 settings (env)
-`AGENT4_SUMMARY_TRIGGER_TOKENS` (3500), `AGENT4_SUMMARY_KEEP_MESSAGES` (6), `AGENT4_MAX_MODEL_CALLS` (12),
-`AGENT4_MAX_TOOL_CALLS` (20). The loop's token budget is `LLM_MAX_TOKENS_PER_JOB`; the loop re-sends its
-history every turn, so use a larger value than the structured agents need (e.g. 40000) or Agent 4 will stop
-early and the automatic checks write the review (`review.source = "rules"`).
+`AGENT4_SUMMARY_TRIGGER_TOKENS` (60000), `AGENT4_SUMMARY_KEEP_MESSAGES` (12), `AGENT4_MAX_MODEL_CALLS` (12),
+`AGENT4_MAX_TOOL_CALLS` (20), `AGENT4_MAX_GRAPH_STEPS` (120). The loop's token budget is `LLM_MAX_TOKENS_PER_JOB`;
+the loop re-sends its history every turn, so use a larger value than the structured agents need (e.g. 40000) or
+Agent 4 will stop early and the automatic checks write the review (`review.source = "rules"`).
+
+The summary trigger must stay well above one review (a real run reports 8-12k tokens), otherwise the
+middleware compacts the context after the read tools and the agent restarts its review from scratch. The graph
+step limit is separate: every turn runs the middleware chain around the model and the tools, so one turn costs
+several steps - 40 cut real reviews off after five tool calls (seen in the live eval).
 
 ## Evaluation
 `evals/tests/test_agent4_tool_correctness.py` scores tool choice, inputs and outputs with DeepEval's

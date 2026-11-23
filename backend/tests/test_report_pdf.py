@@ -3,9 +3,29 @@
 PM-only, real application/pdf bytes starting with %PDF, a download filename, and
 at least one page; Arabic project names must not break shaping/bidi.
 """
+from datetime import date
+
 from pypdf import PdfReader
 
+from app.services.reports import _gantt_fraction, _gantt_span_days
 from helpers import client, make_project, pm_headers, tl_headers
+
+
+def test_gantt_geometry_counts_the_last_day():
+    """End dates are inclusive: two one-day tasks must fill two slots, not one."""
+    start, end = date(2026, 11, 1), date(2026, 11, 2)
+    assert _gantt_span_days(start, end) == 2
+    assert _gantt_fraction(start, start, end) == 0.0
+    assert _gantt_fraction(date(2026, 11, 2), start, end) == 0.5  # second task starts halfway
+    assert _gantt_fraction(date(2026, 11, 3), start, end) == 1.0  # exclusive right edge
+
+
+def test_gantt_geometry_keeps_the_working_day_window_intact():
+    # Golden C: Nov 16 .. Dec 4 (15 working days inside a 19-day calendar window).
+    start, end = date(2026, 11, 16), date(2026, 12, 4)
+    assert _gantt_span_days(start, end) == 19
+    assert _gantt_fraction(date(2026, 11, 17), start, end) == 1 / 19
+    assert _gantt_fraction(date(2026, 12, 4), start, end) == 18 / 19  # the last day is not zero-width
 
 
 def test_pm_downloads_a_real_pdf():

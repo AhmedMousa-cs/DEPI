@@ -118,6 +118,16 @@ def test_summarization_middleware_compacts_long_context(monkeypatch):
     assert res.review_source == "agent4"  # and the agent still finished its job
 
 
+def test_summary_trigger_is_above_one_real_review():
+    # A live review reports ~8-12k tokens (5 reads + 2 saves). With the old 3500 trigger the
+    # middleware compacted the context mid-review and the agent restarted until the recursion
+    # limit. Keep the trigger well above a single review; the compaction path itself is covered
+    # by test_summarization_middleware_compacts_long_context.
+    assert settings.agent4_summary_trigger_tokens >= 20000
+    assert settings.agent4_summary_keep_messages >= 10
+    assert settings.agent4_max_graph_steps >= 100  # 40 cut real reviews off mid-run
+
+
 def test_short_runs_do_not_summarise():
     summarizer = ScriptedChatModel(script=[AIMessage(content="SUMMARY")])
     run([tool_msg(("get_open_risks", {})), final_msg()], summarizer=summarizer)

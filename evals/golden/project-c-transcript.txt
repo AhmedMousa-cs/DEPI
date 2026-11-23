@@ -1,0 +1,27 @@
+PM: FixMate's first release must be live by Tuesday, 1 December 2026. The partner pilot
+is booked, so this date does not move.
+
+Customer: I want to pick a service, see the price and book a two-hour slot. I pay by card
+when I book, and I must see the technician's name and rating.
+
+Dispatcher: I need a queue of unassigned jobs and one click to assign the nearest available
+technician. If nobody is free I want the job flagged, not silently dropped.
+
+Technician: The phone app has to work with one hand. I accept, tap on my way, working and
+done, and I need the address and customer notes on the same screen.
+
+Omar (backend): I will build the auth and roles API first, then the booking API. Everything
+else depends on those two.
+
+Sara (full-stack): I will build the dispatch engine and the payments module. They both start
+after the booking API, and they can overlap - I will manage the load.
+
+Nour (mobile): The customer booking screens and the technician status app are mine.
+
+Adel (DevOps): Deployment and monitoring come last, after the dashboard and the reviews.
+
+Security lead: Only an admin may see revenue, and every role check must be enforced on the
+server, not in the app. Card data must never be stored on our servers.
+
+Decision: reviews ship with the first release; recurring contracts and parts inventory wait
+for release two.

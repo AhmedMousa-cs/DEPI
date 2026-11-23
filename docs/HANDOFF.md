@@ -140,7 +140,9 @@ Previous: v3 on the same model: recall 1.0, precision 0.6957 (below threshold). 
 
 ## Agent 1 live eval, Project A (2026-11-23)
 Model openai/gpt-oss-120b (Groq), prompt agent1_extract_v4, 2 runs:
-recall 0.9333 / 0.9333, precision 0.7619 / 0.7273 (threshold 0.70), quote_faithfulness 1.0, source_verification_rate 1.0, injection_resistant True.
-Not passing: duplicate_detection False (same quote with and without speaker prefix, e.g. "Mona:").
-Non-deterministic: forbidden open questions extracted F01 (run 1), F01+F02 (run 2).
-Previous: v3 same model recall 1.0, precision 0.6957 (below threshold). Local qwen-nexus baseline: recall 0.47, precision 0.54, injection_resistant False.
+- recall 0.9333 / 0.9333, precision 0.7619 / 0.7273 (threshold 0.70), quote_faithfulness 1.0, source_verification_rate 1.0, injection_resistant True.
+- Not passing: duplicate_detection False. The metric counts 1 golden requirement matched by 2 extracted items (per golden requirement, not identical quotes). Root cause not confirmed.
+- Non-deterministic: forbidden open questions extracted F01 (run 1), F01+F02 (run 2).
+- Run 2 missed T06 (ambiguous non-functional, source 2). Possible side effect of the open-question rule; not confirmed with a single run.
+- Previous: v3 same model recall 1.0, precision 0.6957 (below threshold). Local qwen-nexus baseline: recall 0.47, precision 0.54, injection_resistant False.
+- Not run locally: evals/tests/test_agent4_tool_correctness.py (deepeval not installed in this .venv). Other eval tests: 47 passed.

@@ -131,8 +131,33 @@ def test_more_than_eight_risks_is_refused_instead_of_truncated_silently():
 def test_save_plan_review_does_not_approve_anything():
     store = InMemoryPlanStore(sample_snapshot())
     out = run_tool("save_plan_review", {"verdict": "ready", "summary": "All good.", "findings": []}, store=store)
-    assert out == {"saved": True, "verdict": "ready"}
+    assert out == {"saved": True, "verdict": "ready", "notes": []}
     assert store.snapshot(1, 1)["review"]["source"] == "agent4"
+
+
+def test_confidence_is_capped_by_the_evidence_the_plan_provides():
+    snap = sample_snapshot(target_end=None)
+    snap["tasks"][0]["assignee_member_id"] = None
+    store = InMemoryPlanStore(snap)
+    out = run_tool("save_plan_review", {"verdict": "needs_attention", "summary": "One task has no owner.",
+                                        "confidence": "high"}, store=store)
+    assert out["saved"] is True
+    review = store.snapshot(1, 1)["review"]
+    assert review["confidence"] == "medium"
+    limitations = " | ".join(review["limitations"])
+    assert "confidence lowered from high to medium" in limitations
+    assert "no target end date" in limitations and "1 task(s) have no assignee" in limitations
+    assert limitations in " | ".join(out["notes"])
+
+
+def test_a_blocked_verdict_forces_a_revise_recommendation():
+    store = InMemoryPlanStore(sample_snapshot())
+    out = run_tool("save_plan_review", {"verdict": "blocked", "summary": "The deadline is unreachable.",
+                                        "recommendation": "approve_with_changes"}, store=store)
+    assert out["saved"] is True
+    review = store.snapshot(1, 1)["review"]
+    assert review["recommendation"] == "revise"
+    assert any("forced to 'revise'" in x for x in review["limitations"])
 
 
 def test_invalid_verdict_is_rejected_before_saving():

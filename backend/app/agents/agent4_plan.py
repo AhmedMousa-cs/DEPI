@@ -34,6 +34,7 @@ from app.llm.pricing import compute_cost_usd
 from app.llm.usage import TokenUsage
 from app.observability.langfuse import Tracer, get_tracer
 from app.schemas.plan import RECOMMENDATION_FOR_VERDICT, PlanReviewDraft
+from app.services.plan_health import cap_confidence, confidence_cap, plan_health
 from app.services.plan_rules import (
     VERDICT_ORDER, RuleFinding, risk_verdict_floor, rules_review, run_rules, verdict_floor,
 )
@@ -42,9 +43,9 @@ from app.tools.plan_tools import Agent4Context, PlanStore, ToolCallRecord, build
 log = logging.getLogger("nexus.agent4")
 
 AGENT = "agent4_plan"
-PROMPT_VERSION = "agent4_v2"
+PROMPT_VERSION = "agent4_v3"
 TASK_MESSAGE = "Review the current draft plan now, following your instructions."
-_PROMPT = Path(__file__).parent / "prompts" / "agent4_review_v2.md"
+_PROMPT = Path(__file__).parent / "prompts" / "agent4_review_v3.md"
 
 
 def load_prompt() -> str:
@@ -193,7 +194,7 @@ def run_agent4(
     # the plan ready is a contradiction the PM should never have to resolve.
     register_floor = risk_verdict_floor(after.get("risks") or [])
     floor = max((f for f in (auto_floor, register_floor) if f), key=VERDICT_ORDER.get)
-    if review is None or review.get("source") != "agent4":
+    if rules_only or review is None or review.get("source") != "agent4":
         draft = PlanReviewDraft(**rules_review(findings, after))
         store.save_review(project_id, plan_version_id, draft, "rules", run_id)
         source, verdict = "rules", draft.verdict
@@ -203,12 +204,17 @@ def run_agent4(
             top = rules_review(findings, after)["findings"]
             register_drives = bool(register_floor) and VERDICT_ORDER[register_floor] >= VERDICT_ORDER[auto_floor]
             why = "your own saved risks" if register_drives else "the automatic checks"
+            cap = confidence_cap(plan_health(after))
+            confidence, cap_notes = cap_confidence(review.get("confidence") or "medium", cap)
+            limitations = list(review.get("limitations") or [])
+            limitations += [n for n in cap_notes if n not in limitations]
             raised = PlanReviewDraft(
                 verdict=floor, summary=(review["summary"] + f" [Verdict raised by {why}.]")[:2000],
                 findings=(review.get("findings") or []) + top,
-                confidence=review.get("confidence") or "medium",
+                confidence=confidence,
                 recommendation=RECOMMENDATION_FOR_VERDICT[floor],
-                open_questions=review.get("open_questions") or [])
+                open_questions=review.get("open_questions") or [],
+                limitations=limitations[:8])
             store.save_review(project_id, plan_version_id, raised, "agent4", run_id)
             verdict = floor
 

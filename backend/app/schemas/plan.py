@@ -62,6 +62,8 @@ class PlanReviewDraft(BaseModel):
     confidence: Confidence = "medium"
     recommendation: Recommendation | None = None
     open_questions: list[str] = Field(default_factory=list, max_length=8)
+    # Filled by the tool, never by the model: what the plan data could not support.
+    limitations: list[str] = Field(default_factory=list, max_length=8)
 
     @field_validator("findings")
     @classmethod
@@ -73,12 +75,19 @@ class PlanReviewDraft(BaseModel):
     def _trim_questions(cls, v: list[str]) -> list[str]:
         return [q.strip()[:300] for q in v if q and q.strip()][:8]
 
+    @field_validator("limitations")
+    @classmethod
+    def _trim_limitations(cls, v: list[str]) -> list[str]:
+        return [x.strip()[:300] for x in v if x and x.strip()][:8]
+
     @model_validator(mode="after")
     def _consistent_recommendation(self):
         # "approve" next to a non-ready verdict is a contradiction the PM would have to untangle.
         if self.recommendation == "approve" and self.verdict != "ready":
             raise ValueError("recommendation 'approve' requires verdict 'ready'; use "
                              "'approve_with_changes' or 'revise' for this verdict")
+        if self.verdict == "blocked" and self.recommendation not in (None, "revise"):
+            raise ValueError("recommendation for verdict 'blocked' must be 'revise'")
         return self
 
 

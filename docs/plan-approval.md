@@ -35,7 +35,11 @@ PM  POST /plan/generate ──► job agent3.schedule ──► DRAFT plan versi
   its tokens on judgement, not arithmetic.
 - `save_plan_review` also records advisory `confidence`, `recommendation` (`approve` |
   `approve_with_changes` | `revise`) and up to 5 `open_questions`. `recommendation: approve` with a
-  non-ready verdict is rejected by the schema, so the review can never contradict itself.
+  non-ready verdict is rejected by the schema, and a `blocked` verdict only accepts `revise`, so the
+  review can never contradict itself.
+- Confidence is capped by the evidence, not by optimism: no scheduled tasks → `low`; no target end date,
+  no team capacity or unassigned tasks → at most `medium` (`plan_health.confidence_cap`). The cap reasons
+  are stored as `review.limitations` (written by the tool/rules, never by the model).
 - Non-draft versions are immutable. Each version keeps a full JSON snapshot; `diff_from_prev` compares with
   the previous version number, `GET /plan/diff?from_version=&to_version=` compares any two, and the detail
   view also returns `diff_vs_approved`.
@@ -46,6 +50,7 @@ PM  POST /plan/generate ──► job agent3.schedule ──► DRAFT plan versi
 | POST | `/projects/{id}/plan/generate` | queue Agent 3 (`overrides`: per-task `duration_days` / `assignee_member_id`) |
 | POST | `/projects/{id}/plan/review` | queue another Agent 4 review (`rules_only` skips the LLM) |
 | GET | `/projects/{id}/plan/versions`, `/versions/{v}` | list / detail (snapshot, risks, warnings, diffs) |
+| GET | `/projects/{id}/plan/versions/{v}/health` | deterministic plan health + evidence cap (no LLM) |
 | GET | `/projects/{id}/plan/diff?from_version=&to_version=` | diff of any two versions |
 | GET/POST | `/projects/{id}/plan/versions/{v}/gate`, `/open-gate` | gate state / (re)open |
 | POST | `/projects/{id}/plan/versions/{v}/approve`, `/reject` | the PM decision |

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from app.schemas.plan import RECOMMENDATION_FOR_VERDICT, SEVERITY_ORDER, EvidenceRef, RiskDraft
+from app.services.plan_health import cap_confidence, confidence_cap, plan_health
 
 MAX_EVIDENCE = 8
 
@@ -171,6 +172,8 @@ def rules_review(findings: list[RuleFinding], snapshot: dict) -> dict:
         f"Automatic checks found {len(findings)} issue(s); verdict: {floor}."
         if findings else "Automatic checks found no issues."
     )
+    cap = confidence_cap(plan_health(snapshot))
+    confidence, notes = cap_confidence("medium" if findings else "high", cap)
     return {"verdict": floor, "summary": summary, "findings": top,
-            "confidence": "medium" if findings else "high",
+            "confidence": confidence, "limitations": notes,
             "recommendation": RECOMMENDATION_FOR_VERDICT[floor], "open_questions": []}

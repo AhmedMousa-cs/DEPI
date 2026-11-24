@@ -181,11 +181,22 @@ def test_a_rules_only_review_also_carries_a_recommendation():
     assert review["recommendation"] == "approve_with_changes" and review["confidence"] == "medium"
 
 
+def test_rules_only_replaces_an_existing_agent_review():
+    store = InMemoryPlanStore(sample_snapshot())
+    first, _, _ = run(happy_path_script(risks=[], verdict="ready", summary="Looks fine."), store=store)
+    assert first.review_source == "agent4" and store.snapshot(1, 1)["review"]["source"] == "agent4"
+    res, _, _ = run([final_msg()], store=store, rules_only=True)
+    review = store.snapshot(1, 1)["review"]
+    assert res.review_source == "rules" and review["source"] == "rules"
+    assert review["limitations"] == []  # the sample plan has complete data
+    assert review["verdict"] == "needs_attention"  # the automatic checks still floor the verdict
+
+
 def test_the_prompt_lists_every_tool_and_the_current_version():
     from app.tools.plan_tools import READ_TOOL_NAMES, WRITE_TOOL_NAMES
 
     prompt = agent4_plan.load_prompt()
-    assert agent4_plan.PROMPT_VERSION == "agent4_v2" and "agent4_v2" in prompt
+    assert agent4_plan.PROMPT_VERSION == "agent4_v3" and "agent4_v3" in prompt
     for name in READ_TOOL_NAMES + WRITE_TOOL_NAMES:
         assert name in prompt, f"{name} is not mentioned in the prompt"
     assert "never approve" in prompt.lower()

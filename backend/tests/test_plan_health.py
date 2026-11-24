@@ -2,7 +2,7 @@
 import copy
 
 from app.agents.agent4_testing import sample_snapshot
-from app.services.plan_health import longest_chain, plan_health
+from app.services.plan_health import cap_confidence, confidence_cap, longest_chain, plan_health
 
 
 def test_health_pack_computes_the_numbers_a_reviewer_needs():
@@ -85,3 +85,33 @@ def test_a_dependency_cycle_does_not_hang_or_crash():
 def test_the_brief_is_deterministic_for_the_same_snapshot():
     snap = copy.deepcopy(sample_snapshot())
     assert plan_health(snap) == plan_health(copy.deepcopy(snap))
+
+
+# ------------------------------------------------------- confidence is evidence-capped
+def test_a_complete_plan_allows_high_confidence():
+    cap = confidence_cap(plan_health(sample_snapshot()))
+    assert cap == {"level": "high", "reasons": []}
+    assert cap_confidence("high", cap) == ("high", [])
+
+
+def test_a_cap_never_raises_a_lower_requested_confidence():
+    assert cap_confidence("low", {"level": "high", "reasons": []}) == ("low", [])
+
+
+def test_incomplete_data_caps_confidence_at_medium_and_says_why():
+    snap = sample_snapshot(target_end=None)
+    snap["tasks"][0]["assignee_member_id"] = None
+    cap = confidence_cap(plan_health(snap))
+    assert cap["level"] == "medium"
+    text = " | ".join(cap["reasons"])
+    assert "no target end date" in text and "1 task(s) have no assignee" in text
+    final, notes = cap_confidence("high", cap)
+    assert final == "medium" and notes[0].startswith("confidence lowered from high to medium")
+    assert any("no target end date" in n for n in notes)
+
+
+def test_no_team_and_no_tasks_caps_confidence_at_low():
+    cap = confidence_cap(plan_health({}))
+    assert cap["level"] == "low" and "no team capacity data was available" in cap["reasons"]
+    final, notes = cap_confidence("medium", cap)
+    assert final == "low" and notes[0] == "confidence lowered from medium to low: the plan data is incomplete"

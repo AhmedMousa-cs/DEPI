@@ -202,3 +202,38 @@ def plan_health(snapshot: dict) -> dict:
         "under_allocated_tasks": under_allocated[:MAX_ATTENTION],
         "attention": attention,
     }
+
+
+CONFIDENCE_ORDER = {"low": 0, "medium": 1, "high": 2}
+
+
+def confidence_cap(health: dict) -> dict:
+    """How much evidence a review can honestly claim.
+
+    A reviewer that cannot see the team, the target date or an owner for every task has no basis
+    for "high" confidence. Deterministic, so the cap never drifts with the model's mood.
+    """
+    schedule = health.get("schedule") or {}
+    reasons: list[str] = []
+    tasks = int(schedule.get("tasks") or 0)
+    if tasks == 0:
+        reasons.append("no scheduled tasks were found")
+    if not schedule.get("target_end"):
+        reasons.append("the project has no target end date")
+    unassigned = health.get("unassigned_task_ids") or []
+    if unassigned:
+        reasons.append(f"{len(unassigned)} task(s) have no assignee")
+    if not health.get("workload"):
+        reasons.append("no team capacity data was available")
+    level = "low" if tasks == 0 else ("medium" if reasons else "high")
+    return {"level": level, "reasons": reasons}
+
+
+def cap_confidence(requested: str, cap: dict) -> tuple[str, list[str]]:
+    """Lower a requested confidence to the evidence cap; return the final level and the notes."""
+    cap_level = cap.get("level", "high")
+    final = requested if CONFIDENCE_ORDER.get(requested, 1) <= CONFIDENCE_ORDER[cap_level] else cap_level
+    notes = list(cap.get("reasons") or [])
+    if final != requested:
+        notes.insert(0, f"confidence lowered from {requested} to {final}: the plan data is incomplete")
+    return final, notes

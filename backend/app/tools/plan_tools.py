@@ -13,7 +13,7 @@ from typing import Any, Literal, Protocol
 from langchain.tools import ToolRuntime, tool
 
 from app.schemas.plan import RECOMMENDATION_FOR_VERDICT, PlanReviewDraft, RiskDraft
-from app.services.plan_health import plan_health
+from app.services.plan_health import cap_confidence, confidence_cap, plan_health
 from app.services.plan_rules import run_rules
 from app.services.plan_versions import PlanVersionError, RiskValidationError
 
@@ -162,16 +162,22 @@ def build_plan_tools(store: PlanStore) -> list:
                          confidence: Literal["low", "medium", "high"] | None = None,
                          recommendation: Literal["approve", "approve_with_changes", "revise"] | None = None,
                          open_questions: list[str] | None = None) -> dict:
-        """Save your review of the draft plan. Call it exactly once, after the risks. verdict is the plan's state; recommendation is advice to the PM (approve only with verdict=ready) and open_questions are what you still need answered. It does NOT approve anything."""
+        """Save your review of the draft plan. Call it exactly once, after the risks. verdict is the plan's state; recommendation is advice to the PM (approve only with verdict=ready, revise only with verdict=blocked) and open_questions are what you still need answered. Confidence is capped by the evidence: it cannot be 'high' when the plan has no team, no target end date or unassigned tasks. It does NOT approve anything."""
         c = runtime.context
         try:
+            health = plan_health(store.snapshot(c.project_id, c.plan_version_id))
+            confidence, notes = cap_confidence(confidence or "medium", confidence_cap(health))
+            rec = recommendation or RECOMMENDATION_FOR_VERDICT[verdict]
+            if verdict == "blocked" and rec != "revise":
+                notes.append("recommendation forced to 'revise' because the verdict is blocked")
+                rec = "revise"
             review = PlanReviewDraft(
                 verdict=verdict, summary=summary, findings=findings or [],
-                confidence=confidence or "medium",
-                recommendation=recommendation or RECOMMENDATION_FOR_VERDICT[verdict],
-                open_questions=open_questions or [],
+                confidence=confidence, recommendation=rec,
+                open_questions=open_questions or [], limitations=notes,
             )
-            return store.save_review(c.project_id, c.plan_version_id, review, "agent4", c.run_id)
+            saved = store.save_review(c.project_id, c.plan_version_id, review, "agent4", c.run_id)
+            return {**saved, "notes": notes}
         except (PlanVersionError, ValueError) as exc:
             return {"saved": False, "errors": [str(exc)]}
 

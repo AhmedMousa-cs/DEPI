@@ -216,6 +216,17 @@ OCR; meeting recording/transcription; automatic external messages; one independe
 - **Decision:** On entering the Plan review tab, reconcile the stored job with `GET /projects/{id}/jobs` (a finished job replaces the stale snapshot; a missing job clears it); when a poll fails for any reason other than `unauthorized`, drop an active job and re-render instead of freezing. Load `app.js` with a per-load query string so a local/demo browser always executes the current file.
 - **Consequence:** The screen follows the server, never a client-side guess; the PM can retry immediately after a failure. The single frontend file is re-fetched on each load (negligible on localhost and guaranteed fresh for demos).
 
+### ADR-024: Agent 4 confidence is capped by evidence, and the plan's facts are visible on their own
+- **Status:** Approved
+- **Context:** v2 could still claim `high` confidence while the plan had no team, no target end date or unassigned tasks - the reviewer would sound certain about evidence it never had. `blocked` could also pair with `approve_with_changes`, and the deterministic numbers that justify a verdict were only visible inside the agent's context, not to the PM. Separately, a Groq free-tier 429 during a demo could leave the PM with no review at all.
+- **Decision:**
+  - **Evidence-capped confidence** (`services/plan_health.confidence_cap`): no scheduled tasks cap it at `low`; no target end date, no team capacity or unassigned tasks cap it at `medium`; `high` requires all of them to be present. `cap_confidence` can only lower what the model asked for, never raise it, and records each reason as a `limitations` entry on the review (filled by the tool/rules, never by the model).
+  - **Verdict-consistent recommendation:** the schema now rejects any recommendation other than `revise` (or none) for a `blocked` verdict, and the tool coerces it with an explicit note instead of failing the run.
+  - **`GET /plan/versions/{v}/health` (PM only):** returns the same deterministic `plan_health` brief plus the `confidence_cap` for a stored version, with no LLM call. The Plan review screen renders it as a **Plan health** card (delivery signal, days late/early, critical share, zero-float, overloaded members, estimate hours, ranked attention points, evidence cap).
+  - **"Automatic checks only" button:** posts `POST /plan/review` with `{rules_only: true}`, which the existing worker path already supports: instant, free and always available when the model is rate-limited. The review is saved with `source=rules` and the same capping/consistency rules.
+  - **Prompt v3** (`agent4_review_v3.md`): states the confidence-evidence rule and the blocked⇒revise rule; v1/v2 stay for history.
+- **Consequence:** a review can no longer overstate its evidence or contradict its own verdict, the PM can see and verify the numbers behind a verdict without paying for a model call, and a rate-limited demo still produces a real stored review. No migration: all new fields live in the plan snapshot JSON.
+
 ## Decision Log
 
 | Date | Decision | Reason |
@@ -237,3 +248,4 @@ OCR; meeting recording/transcription; automatic external messages; one independe
 | 2026-11-18 | Change management: approved tasks change only via audited change requests with computed impact (ADR-020) | PM asked for proper change management ("كبير"); draft→decide flow with deterministic impact, applied changes audited |
 | 2026-11-22 | Agent 4 professional edition: deterministic review brief, confidence/recommendation/open questions, risk-consistent verdict floor (ADR-022) | PM asked for a more professional Agent 4; every number is now computed by code and a review cannot contradict its own risk register |
 | 2026-11-24 | Plan review never shows a stale job; `app.js` cache-busted per load (ADR-023) | A stopped poll left "Working..." forever after a restart and a cached script hid UI fixes; the screen now follows the server |
+| 2026-11-24 | Agent 4 confidence capped by evidence + verdict-consistent recommendation + Plan health endpoint/card + "Automatic checks only" (ADR-024) | A review must not sound certain about missing data; the PM can see the numbers behind a verdict for free and a rate-limited demo still saves a real review |

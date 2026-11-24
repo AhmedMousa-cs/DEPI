@@ -16,7 +16,7 @@ PM  POST /plan/generate ──► job agent3.schedule ──► DRAFT plan versi
 ```
 
 ## Rules enforced in code (each has a test)
-- Agents write **drafts only**. Agent 4 has 6 read tools and 2 write tools (`save_draft_risks`,
+- Agents write **drafts only**. Agent 4 has 7 read tools and 2 write tools (`save_draft_risks`,
   `save_plan_review`); there is no approve/reject tool, and no module under `app/agents` or `app/tools`
   imports the approval code (AST test). Only `services/plan_approval.py` sets a PlanVersion to `approved`.
 - `project_id` / `plan_version_id` come from the run context, never from tool arguments.
@@ -26,6 +26,16 @@ PM  POST /plan/generate ──► job agent3.schedule ──► DRAFT plan versi
   the PM sent `acknowledge_warnings: true`. `decided_by` is always the authenticated PM.
 - The automatic checks (`services/plan_rules.py`) always run; the agent's verdict can be raised by them,
   never lowered. Every risk needs severity, likelihood and evidence that exists in the plan.
+- A second deterministic floor comes from the saved risk register: a `high` risk forces at least
+  `needs_attention`, a `critical` risk forces `blocked`. A reviewer cannot record a critical risk and
+  then call the plan ready.
+- Agent 4 starts from `get_plan_health`, a code-computed brief (`services/plan_health.py`): delivery
+  signal, days late/early, critical-path share, per-member workload, longest dependency chain,
+  under-allocated estimates, dependency timing problems and a ranked attention list. The model spends
+  its tokens on judgement, not arithmetic.
+- `save_plan_review` also records advisory `confidence`, `recommendation` (`approve` |
+  `approve_with_changes` | `revise`) and up to 5 `open_questions`. `recommendation: approve` with a
+  non-ready verdict is rejected by the schema, so the review can never contradict itself.
 - Non-draft versions are immutable. Each version keeps a full JSON snapshot; `diff_from_prev` compares with
   the previous version number, `GET /plan/diff?from_version=&to_version=` compares any two, and the detail
   view also returns `diff_vs_approved`.

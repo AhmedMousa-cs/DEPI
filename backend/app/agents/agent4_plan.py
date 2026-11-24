@@ -33,16 +33,18 @@ from app.db.session import SessionLocal
 from app.llm.pricing import compute_cost_usd
 from app.llm.usage import TokenUsage
 from app.observability.langfuse import Tracer, get_tracer
-from app.schemas.plan import PlanReviewDraft
-from app.services.plan_rules import VERDICT_ORDER, RuleFinding, rules_review, run_rules, verdict_floor
+from app.schemas.plan import RECOMMENDATION_FOR_VERDICT, PlanReviewDraft
+from app.services.plan_rules import (
+    VERDICT_ORDER, RuleFinding, risk_verdict_floor, rules_review, run_rules, verdict_floor,
+)
 from app.tools.plan_tools import Agent4Context, PlanStore, ToolCallRecord, build_plan_tools
 
 log = logging.getLogger("nexus.agent4")
 
 AGENT = "agent4_plan"
-PROMPT_VERSION = "agent4_v1"
+PROMPT_VERSION = "agent4_v2"
 TASK_MESSAGE = "Review the current draft plan now, following your instructions."
-_PROMPT = Path(__file__).parent / "prompts" / "agent4_review_v1.md"
+_PROMPT = Path(__file__).parent / "prompts" / "agent4_review_v2.md"
 
 
 def load_prompt() -> str:
@@ -186,18 +188,27 @@ def run_agent4(
 
     after = store.snapshot(project_id, plan_version_id)
     review = after.get("review")
-    floor = verdict_floor(findings, after)
+    auto_floor = verdict_floor(findings, after)
+    # The agent's own risk register is a second floor: recording a critical risk and then calling
+    # the plan ready is a contradiction the PM should never have to resolve.
+    register_floor = risk_verdict_floor(after.get("risks") or [])
+    floor = max((f for f in (auto_floor, register_floor) if f), key=VERDICT_ORDER.get)
     if review is None or review.get("source") != "agent4":
         draft = PlanReviewDraft(**rules_review(findings, after))
         store.save_review(project_id, plan_version_id, draft, "rules", run_id)
         source, verdict = "rules", draft.verdict
     else:
         source, verdict = "agent4", review["verdict"]
-        if VERDICT_ORDER[floor] > VERDICT_ORDER[verdict]:  # the agent may not be softer than the code
+        if VERDICT_ORDER[floor] > VERDICT_ORDER[verdict]:  # the agent may not be softer than the evidence
             top = rules_review(findings, after)["findings"]
+            register_drives = bool(register_floor) and VERDICT_ORDER[register_floor] >= VERDICT_ORDER[auto_floor]
+            why = "your own saved risks" if register_drives else "the automatic checks"
             raised = PlanReviewDraft(
-                verdict=floor, summary=(review["summary"] + " [Verdict raised by the automatic checks.]")[:2000],
-                findings=(review.get("findings") or []) + top)
+                verdict=floor, summary=(review["summary"] + f" [Verdict raised by {why}.]")[:2000],
+                findings=(review.get("findings") or []) + top,
+                confidence=review.get("confidence") or "medium",
+                recommendation=RECOMMENDATION_FOR_VERDICT[floor],
+                open_questions=review.get("open_questions") or [])
             store.save_review(project_id, plan_version_id, raised, "agent4", run_id)
             verdict = floor
 

@@ -4,15 +4,23 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Severity = Literal["low", "medium", "high", "critical"]
 Likelihood = Literal["low", "medium", "high"]
 EvidenceType = Literal["task", "member", "requirement", "conflict"]
 Verdict = Literal["ready", "needs_attention", "blocked"]
+Confidence = Literal["low", "medium", "high"]
+# Advisory only: this is what Agent 4 would do, never a decision. The PM decides.
+Recommendation = Literal["approve", "approve_with_changes", "revise"]
 PlanStatus = Literal["draft", "approved", "rejected", "superseded"]
 
 SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+RECOMMENDATION_FOR_VERDICT: dict[str, str] = {
+    "ready": "approve",
+    "needs_attention": "approve_with_changes",
+    "blocked": "revise",
+}
 
 
 class EvidenceRef(BaseModel):
@@ -44,16 +52,34 @@ class RiskDraft(BaseModel):
 
 
 class PlanReviewDraft(BaseModel):
+    """Agent 4's review. Advisory: nothing here approves, rejects or changes a plan."""
+
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     verdict: Verdict
     summary: str = Field(min_length=3, max_length=2000)
     findings: list[str] = Field(default_factory=list, max_length=20)
+    confidence: Confidence = "medium"
+    recommendation: Recommendation | None = None
+    open_questions: list[str] = Field(default_factory=list, max_length=8)
 
     @field_validator("findings")
     @classmethod
     def _trim(cls, v: list[str]) -> list[str]:
         return [f.strip()[:500] for f in v if f and f.strip()]
+
+    @field_validator("open_questions")
+    @classmethod
+    def _trim_questions(cls, v: list[str]) -> list[str]:
+        return [q.strip()[:300] for q in v if q and q.strip()][:8]
+
+    @model_validator(mode="after")
+    def _consistent_recommendation(self):
+        # "approve" next to a non-ready verdict is a contradiction the PM would have to untangle.
+        if self.recommendation == "approve" and self.verdict != "ready":
+            raise ValueError("recommendation 'approve' requires verdict 'ready'; use "
+                             "'approve_with_changes' or 'revise' for this verdict")
+        return self
 
 
 # ------------------------------------------------------------------------------ API

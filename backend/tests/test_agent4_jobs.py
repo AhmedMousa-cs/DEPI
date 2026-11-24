@@ -144,9 +144,9 @@ def test_agent4_job_reviews_the_draft_and_persists_risks(monkeypatch):
         assert run.status == "completed" and run.total_tokens == 1630 and run.job_id == j.id
         assert {r.run_id for r in risks} == {run.id}
     calls = audit_rows("agent4.tool_call")
-    assert len(calls) == 7 and all(c.after["project_id"] == pid for c in calls)
+    assert len(calls) == 8 and all(c.after["project_id"] == pid for c in calls)
     done = audit_rows("agent4.review_completed")[0].after
-    assert done["verdict"] == "ready" and done["tool_calls"] == 7
+    assert done["verdict"] == "ready" and done["tool_calls"] == 8
 
 
 def test_review_is_reproducible_rule_risks_do_not_duplicate(monkeypatch):

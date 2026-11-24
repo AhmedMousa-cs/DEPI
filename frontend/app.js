@@ -15,6 +15,7 @@ function esc(v) { return String(v == null ? "" : v).replace(/[&<>"']/g, c => ({ 
 function fmtDate(v) { return v ? new Date(v + "T12:00:00").toLocaleDateString(state.lang === "ar" ? "ar" : undefined, { month: "short", day: "numeric", year: "numeric" }) : t("Not set"); }
 function fmtDateTime(v) { return v ? new Date(v).toLocaleString() : ""; }
 function kv(k, v) { return `<div class="keyval"><small>${esc(k)}</small><b>${esc(v)}</b></div>`; }
+function kvHtml(k, html) { return `<div class="keyval"><small>${esc(k)}</small><b>${html}</b></div>`; }
 function field(label, inner, full) { return `<div class="field${full ? " full" : ""}"><label>${label}</label>${inner}</div>`; }
 function statusBadge(s) { return `<span class="badge ${s === "active" ? "green" : s === "closed" ? "" : "blue"}">${esc(STATUS[s] || s)}</span>`; }
 
@@ -117,6 +118,22 @@ const AR = {
   "Open approval gate": "فتح بوابة الاعتماد",
   "Agent 4 review": "مراجعة Agent 4",
   "Verdict": "الحكم",
+  "Recommendation": "التوصية (استشارية)",
+  "Confidence": "درجة الثقة",
+  "Findings": "الملاحظات",
+  "Open questions for the PM": "أسئلة مفتوحة للمدير",
+  "Not stated": "غير مذكورة",
+  "Automatic checks": "الفحوصات التلقائية",
+  "Agent 4 reads a deterministic brief, records evidence-backed risks and recommends a verdict. The automatic checks and the saved risks can raise that verdict, never lower it — and the recommendation is advice: you decide.": "يقرأ Agent 4 ملخصاً محسوباً تلقائياً، ويسجل مخاطر مدعومة بأدلة، ويوصي بحكم. الفحوصات التلقائية والمخاطر المحفوظة قد ترفع الحكم ولا تخفضه أبداً — والتوصية استشارية: القرار لك.",
+  "approve": "اعتماد",
+  "Approve": "اعتماد",
+  "Approve with changes": "اعتماد مع تعديلات",
+  "Revise first": "مراجعة قبل الاعتماد",
+  "approve_with_changes": "اعتماد مع تعديلات",
+  "revise": "إعادة مراجعة",
+  "low": "منخفضة",
+  "medium": "متوسطة",
+  "high": "عالية",
   "Likelihood": "الاحتمالية",
   "Mitigation": "التخفيف",
   "Rule": "قاعدة",
@@ -979,6 +996,10 @@ Object.assign(actions, {
         const jobs = await api(`/projects/${state.project.id}/jobs`);
         const active = jobs.find(j => ["agent4.review", "agent3.schedule"].includes(j.type) && ["queued", "running"].includes(j.status));
         if (active) { state.planReviewJob = active; pollPlanReviewJob(active.id); }
+        else if (state.planReviewJob) {
+          // Never keep a stale "queued" line after a restart: reconcile with the server.
+          state.planReviewJob = jobs.find(j => j.id === state.planReviewJob.id) || null;
+        }
       } catch (e) { if (e.message === "unauthorized") throw e; }
     }
     baseTab(t);
@@ -1554,6 +1575,7 @@ const PV_LABEL = { draft: "Draft", approved: "Approved", rejected: "Rejected", s
 const RISK_BADGE = { low: "green", medium: "blue", high: "", critical: "red" };
 const RISK_STATUS = { draft: "Draft", open: "Open", dismissed: "Dismissed", superseded: "Superseded" };
 const VERDICT_VIEW = { ready: ["Ready", "green"], needs_attention: ["Needs attention", ""], blocked: ["Blocked", "red"] };
+const RECOMMENDATION_VIEW = { approve: ["Approve", "green"], approve_with_changes: ["Approve with changes", "blue"], revise: ["Revise first", "red"] };
 
 const pvBadge = s => `<span class="badge ${s === "approved" ? "green" : s === "rejected" ? "red" : s === "draft" ? "blue" : ""}">${esc(t(PV_LABEL[s] || s))}</span>`;
 
@@ -1601,7 +1623,14 @@ function pollPlanReviewJob(jobId) {
         if (finished) { await reloadPlanReview(true); await reloadProject(); }
         if (!state.modal) render();
       }
-    } catch (e) { clearInterval(planReviewTimer); }
+    } catch (e) {
+      clearInterval(planReviewTimer);
+      // A dropped poll (server restart, expired token) must not leave a frozen "queued" line.
+      if (e.message !== "unauthorized" && state.planReviewJob && ["queued", "running"].includes(state.planReviewJob.status)) {
+        state.planReviewJob = null;
+        if (state.page === "project" && state.tab === "planreview" && !state.modal) render();
+      }
+    }
   };
   tick(); planReviewTimer = setInterval(tick, 3000);
 }
@@ -1625,8 +1654,14 @@ function pvReviewCard(snapshot) {
   const review = (snapshot || {}).review;
   if (!review) return `<div class="callout warning">${t("Agent 4 has not reviewed this draft yet. Run the review before opening the gate.")}</div>`;
   const v = VERDICT_VIEW[review.verdict] || [review.verdict, ""];
+  const rv = RECOMMENDATION_VIEW[review.recommendation] || [review.recommendation, "blue"];
+  const verdict = `<span class="badge ${v[1]}">${esc(t(v[0]))}</span>`;
+  const rec = review.recommendation ? `<span class="badge ${rv[1]}">${esc(t(rv[0]))}</span>` : `<span class="subtle">${esc(t("Not stated"))}</span>`;
+  const conf = `<span class="badge">${esc(t(review.confidence || "medium"))}</span>`;
   const findings = (review.findings || []).map(f => `<li>${esc(f)}</li>`).join("");
-  return `<div class="keyvals">${kv(t("Verdict"), t(v[0]))}${kv(t("Summary"), review.summary || "—")}</div>${findings ? `<ul style="margin:8px 0 0 18px;font-size:13px">${findings}</ul>` : ""}`;
+  const questions = (review.open_questions || []).map(q => `<li>${esc(q)}</li>`).join("");
+  const meta = [review.source === "rules" ? t("Automatic checks") : "Agent 4", review.reviewed_at ? fmtDateTime(review.reviewed_at) : ""].filter(Boolean).join(" · ");
+  return `<div class="keyvals">${kvHtml(t("Verdict"), verdict)}${kvHtml(t("Recommendation"), rec)}${kvHtml(t("Confidence"), conf)}${kv(t("Summary"), review.summary || "—")}</div>${findings ? `<div style="margin-top:10px"><b>${t("Findings")}</b><ul style="margin:6px 0 0 18px;font-size:13px">${findings}</ul></div>` : ""}${questions ? `<div style="margin-top:10px"><b>${t("Open questions for the PM")}</b><ul style="margin:6px 0 0 18px;font-size:13px">${questions}</ul></div>` : ""}${meta ? `<p class="subtle" style="margin-top:10px">${esc(meta)}</p>` : ""}`;
 }
 
 function pvRiskRow(r) {
@@ -1692,7 +1727,7 @@ function planReviewView() {
     <div class="keyvals">${kv(t("Project start"), fmtDate(sched.project_start))}${kv(t("Project end"), fmtDate(sched.project_end))}${kv(t("Duration"), (sched.total_duration_days || 0) + " " + t("working days"))}${kv(t("Tasks"), String(tasks.length))}${kv(t("Critical path"), String((sched.critical_path || []).length) + " " + t("tasks"))}${kv(t("Resource conflicts"), String(conflicts.length))}${kv(t("Open risks"), String(risks.filter(r => r.status === "draft" || r.status === "open").length))}</div>
     ${approvedNote}${gateActions}
   </section>
-  <section class="card section-card"><h2>${t("Agent 4 review")}</h2><p class="section-intro">${t("LangGraph review over the snapshot: rules may raise a concern but can never lower the agent's verdict.")}</p>${reviewHtml}</section>
+  <section class="card section-card"><h2>${t("Agent 4 review")}</h2><p class="section-intro">${t("Agent 4 reads a deterministic brief, records evidence-backed risks and recommends a verdict. The automatic checks and the saved risks can raise that verdict, never lower it — and the recommendation is advice: you decide.")}</p>${reviewHtml}</section>
 </div>
 <section class="card section-card"><h2>${t("Approval warnings")}</h2><p class="section-intro">${t("Shown before approval; the PM must acknowledge them explicitly.")}</p>${warningsHtml}</section>
 ${vsApproved}

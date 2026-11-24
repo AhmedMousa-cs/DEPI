@@ -14,6 +14,7 @@ def get_langchain_model(model_name: str | None = None):
     provider = (settings.llm_provider or "").lower()
     model_id = model_name or settings.model_llm
     timeout = settings.llm_timeout_seconds
+    retries = max(0, int(settings.llm_max_retries))
 
     if provider == "groq":
         if not settings.groq_api_key:
@@ -21,19 +22,20 @@ def get_langchain_model(model_name: str | None = None):
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(model=model_id, api_key=settings.groq_api_key, base_url=settings.llm_base_url,
-                          temperature=0, timeout=timeout, max_retries=1)
+                          temperature=0, timeout=timeout, max_retries=retries)
     if provider == "anthropic":
         if not settings.anthropic_api_key:
             raise LLMConfigurationError("ANTHROPIC_API_KEY is not set")
         from langchain_anthropic import ChatAnthropic
 
         return ChatAnthropic(model=model_id, api_key=settings.anthropic_api_key, temperature=0,
-                             timeout=timeout, max_retries=1)
+                             timeout=timeout, max_retries=retries)
     if provider == "ollama":
         from langchain_openai import ChatOpenAI
 
         base = (settings.llm_base_url or "http://localhost:11434").rstrip("/")
         if base.endswith("/v1"):
             base = base[:-3]
-        return ChatOpenAI(model=model_id, api_key="ollama", base_url=f"{base}/v1", temperature=0, timeout=timeout)
+        return ChatOpenAI(model=model_id, api_key="ollama", base_url=f"{base}/v1", temperature=0,
+                          timeout=timeout, max_retries=retries)
     raise LLMConfigurationError(f"Unsupported LLM provider: '{provider}'")

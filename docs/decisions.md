@@ -199,6 +199,23 @@ OCR; meeting recording/transcription; automatic external messages; one independe
   - **Loop budget:** a real review reports 8-12k tokens and each turn costs several graph steps, so the summary trigger is 60000 (12 kept messages) and the graph limit is 120; the old 3500/40 pair compacted the context mid-review and restarted it. All three are env-overridable (`AGENT4_SUMMARY_TRIGGER_TOKENS`, `AGENT4_SUMMARY_KEEP_MESSAGES`, `AGENT4_MAX_GRAPH_STEPS`).
 - **Consequence:** the plan is reviewed and decided as a whole before execution, risks are stored and auditable, and the existing Schedule tab approval keeps working. Known integration debt: two approval paths can write dates; they should be unified in a later milestone.
 
+### ADR-022: Agent 4 professional edition - deterministic review brief, advisory recommendation, risk-consistent verdict
+- **Status:** Approved
+- **Context:** The PM asked for a more professional Agent 4. The first version could read the plan but had to do its own arithmetic, wrote a verdict with no confidence or advice, and could technically record a critical risk and still call the plan ready. A reviewer the PM can trust must be consistent, auditable and cheap on tokens.
+- **Decision:**
+  - **A deterministic brief in code** (`services/plan_health.py`, exposed as `get_plan_health`, the first read): delivery signal (`on_track|at_risk|late`), days late/early, critical-path share, zero-float count, total estimate hours, per-member workload with utilization and critical tasks, the longest dependency chain, tasks scheduled with fewer hours than their estimate, dependency timing problems (including missing dependencies), and a ranked `attention` list (max 10). Pure function, unit-tested, deterministic.
+  - **A richer review** (`PlanReviewDraft`): advisory `confidence` (`low|medium|high`), `recommendation` (`approve|approve_with_changes|revise`) and up to 5 `open_questions`. `recommendation: approve` with a non-ready verdict is rejected by a model validator, so the review cannot contradict itself; when the agent omits the recommendation, the tool derives it from the verdict.
+  - **A second verdict floor from the risk register:** a saved `high` risk forces at least `needs_attention`, a `critical` risk forces `blocked`. When that floor raises the agent's verdict, the summary says it was raised by "your own saved risks"; the automatic-checks message is unchanged.
+  - **Prompt v2** (`agent4_review_v2.md`): five review dimensions, severity/likelihood anchors, an explicit verdict rubric, a risk quality bar (cause + consequence + mitigation), `save_draft_risks` capped at 8 per call, and the existing injection-safety rules. A drift test asserts the prompt still names every tool and the current prompt version.
+  - **UI:** the Plan review card shows verdict, recommendation, confidence, findings, open questions and the review source/time, and escapes the LLM summary (agent text is untrusted).
+- **Consequence:** Agent 4's numbers are reproducible, its advice is explicit but never a decision, and its verdict cannot be softer than the risks it saved. No schema migration: the new fields live inside the plan snapshot JSON.
+
+### ADR-023: A plan-review screen never shows a stale job; the demo always loads the current UI
+- **Status:** Approved
+- **Context:** After an API restart the review poller stopped on its network error and left `planReviewJob` at its last snapshot (`queued`, 10%), so the PM saw "Working..." forever and could not start a review. Separately, the frontend is a static `app.js` with no cache headers; a browser kept serving an older file, so a UI fix was invisible during a demo.
+- **Decision:** On entering the Plan review tab, reconcile the stored job with `GET /projects/{id}/jobs` (a finished job replaces the stale snapshot; a missing job clears it); when a poll fails for any reason other than `unauthorized`, drop an active job and re-render instead of freezing. Load `app.js` with a per-load query string so a local/demo browser always executes the current file.
+- **Consequence:** The screen follows the server, never a client-side guess; the PM can retry immediately after a failure. The single frontend file is re-fetched on each load (negligible on localhost and guaranteed fresh for demos).
+
 ## Decision Log
 
 | Date | Decision | Reason |
@@ -218,3 +235,5 @@ OCR; meeting recording/transcription; automatic external messages; one independe
 | 2026-11-18 | Delivery tracking: PM-only PATCH task progress + Gantt on Schedule tab (ADR-018) | PM asked for a Gantt + execution tracking; todo→0/done→100 rules, audited, portfolio auto-syncs |
 | 2026-11-18 | PDF export: server-side reportlab report with bundled Amiri font (ADR-019) | PM asked for PDF export; report mirrors the DB (no LLM), Arabic shaping handled |
 | 2026-11-18 | Change management: approved tasks change only via audited change requests with computed impact (ADR-020) | PM asked for proper change management ("كبير"); draft→decide flow with deterministic impact, applied changes audited |
+| 2026-11-22 | Agent 4 professional edition: deterministic review brief, confidence/recommendation/open questions, risk-consistent verdict floor (ADR-022) | PM asked for a more professional Agent 4; every number is now computed by code and a review cannot contradict its own risk register |
+| 2026-11-24 | Plan review never shows a stale job; `app.js` cache-busted per load (ADR-023) | A stopped poll left "Working..." forever after a restart and a cached script hid UI fixes; the screen now follows the server |

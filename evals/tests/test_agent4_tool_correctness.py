@@ -6,7 +6,7 @@ wrong inputs, wrong outputs, a missing step and a forbidden `approve` attempt.
 import pytest
 from deepeval.test_case import ToolCall
 
-from app.agents.agent4_testing import final_msg, happy_path_script, sample_snapshot, tool_msg
+from app.agents.agent4_testing import READ_ALL, final_msg, happy_path_script, sample_snapshot, tool_msg
 from evals.agent4_harness import evaluate, expected_reads, run_scenario
 
 RISK = {"title": "API is the bottleneck", "description": "Both backend tasks sit on one person.",
@@ -42,8 +42,9 @@ def test_correct_tools_inputs_and_outputs_score_perfectly(snap):
 
 def test_read_outputs_match_what_the_snapshot_says(snap):
     result, store = happy(snap)
-    reads_only = [c for c in expected_reads(snap, store)]
-    score, _ = evaluate(result, reads_only + expected_happy(snap, store)[5:])
+    expected = expected_happy(snap, store)
+    reads = expected_reads(snap, store)
+    score, _ = evaluate(result, reads + expected[len(reads):])
     assert score == 1.0
 
 
@@ -109,8 +110,7 @@ def test_clean_plan_flow_also_scores_perfectly():
     snap["tasks"][2]["total_float"] = 1
     snap["schedule"]["critical_task_ids"], snap["schedule"]["critical_path"] = [11], [11]
     review = {"verdict": "ready", "summary": "Looks fine.", "findings": []}
-    script = [tool_msg(*[(n, {}) for n in ("get_project_brief", "get_agent3_results", "get_tasks_and_dependencies",
-                                           "get_team_capacity", "get_open_risks")]),
+    script = [tool_msg(*[(n, {}) for n in READ_ALL]),
               tool_msg(("save_plan_review", review)), final_msg()]
     result, store = run_scenario(snap, script)
     expected = expected_reads(snap, store) + [

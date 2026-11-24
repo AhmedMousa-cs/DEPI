@@ -28,8 +28,9 @@ def names(res):
 
 def test_happy_path_reads_saves_risks_and_review():
     res, store, model = run(happy_path_script(risks=[RISK], verdict="needs_attention", summary="Ahmed is double booked."))
-    assert sorted(names(res)) == sorted(["get_project_brief", "get_agent3_results", "get_tasks_and_dependencies",
-                                         "get_team_capacity", "get_open_risks", "save_draft_risks", "save_plan_review"])
+    assert sorted(names(res)) == sorted(["get_project_brief", "get_plan_health", "get_agent3_results",
+                                         "get_tasks_and_dependencies", "get_team_capacity", "get_open_risks",
+                                         "save_draft_risks", "save_plan_review"])
     assert res.review_source == "agent4" and res.verdict == "needs_attention"
     assert res.agent_risks_saved == 1 and res.rule_risks_saved == len(store.rule_risks) == 4
     assert [r.title for r in store.agent_risks] == ["API is the bottleneck"]
@@ -149,6 +150,48 @@ class RecordingLedger(NullLedger):
         self.events.append(("fail", run_id, kw["error"][:20]))
 
 
+def test_a_critical_risk_cannot_sit_next_to_a_ready_verdict():
+    critical = {**RISK, "severity": "critical", "likelihood": "high", "title": "Booking API has one owner"}
+    snap = sample_snapshot(overlap=False)  # no rule issue on its own
+    snap["tasks"][2]["total_float"] = 1
+    snap["schedule"]["critical_task_ids"], snap["schedule"]["critical_path"] = [11], [11]
+    res, store, _ = run(happy_path_script(risks=[critical], verdict="ready", summary="Looks fine."),
+                        store=InMemoryPlanStore(snap))
+    assert res.verdict == "blocked"
+    review = store.snapshot(1, 1)["review"]
+    assert "raised by your own saved risks" in review["summary"]
+    assert review["recommendation"] == "revise"  # the raised verdict keeps the fields consistent
+
+
+def test_a_high_risk_lifts_ready_to_needs_attention():
+    high = {**RISK, "severity": "high", "title": "One person owns the whole backend"}
+    snap = sample_snapshot(overlap=False)
+    snap["tasks"][2]["total_float"] = 1
+    snap["schedule"]["critical_task_ids"], snap["schedule"]["critical_path"] = [11], [11]
+    res, store, _ = run(happy_path_script(risks=[high], verdict="ready", summary="Looks fine."),
+                        store=InMemoryPlanStore(snap))
+    assert res.verdict == "needs_attention"
+    assert store.snapshot(1, 1)["review"]["recommendation"] == "approve_with_changes"
+
+
+def test_a_rules_only_review_also_carries_a_recommendation():
+    res, store, _ = run([final_msg()])
+    review = store.snapshot(1, 1)["review"]
+    assert res.review_source == "rules"
+    assert review["recommendation"] == "approve_with_changes" and review["confidence"] == "medium"
+
+
+def test_the_prompt_lists_every_tool_and_the_current_version():
+    from app.tools.plan_tools import READ_TOOL_NAMES, WRITE_TOOL_NAMES
+
+    prompt = agent4_plan.load_prompt()
+    assert agent4_plan.PROMPT_VERSION == "agent4_v2" and "agent4_v2" in prompt
+    for name in READ_TOOL_NAMES + WRITE_TOOL_NAMES:
+        assert name in prompt, f"{name} is not mentioned in the prompt"
+    assert "never approve" in prompt.lower()
+    assert "get_plan_health" in prompt
+
+
 def test_run_accounting_uses_the_ledger():
     ledger = RecordingLedger()
     res, *_ = run(happy_path_script(risks=[RISK]), ledger=ledger)
@@ -178,7 +221,7 @@ def test_an_llm_failure_fails_the_run_and_is_raised():
 def test_every_tool_call_is_audited():
     seen = []
     run(happy_path_script(risks=[RISK]), audit_sink=lambda ctx, rec: seen.append((ctx.project_id, rec.name)))
-    assert len(seen) == 7 and {p for p, _ in seen} == {1}
+    assert len(seen) == 8 and {p for p, _ in seen} == {1}
 
 
 def test_a_failing_audit_sink_never_breaks_the_run():

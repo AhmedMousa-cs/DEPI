@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 from evals.agent4_harness import called_tools, evaluate, expected_reads, make_metric, run_scenario  # noqa: F401
+from app.agents import agent4_plan
 from app.agents.agent4_testing import InMemoryPlanStore, sample_snapshot
 from app.config import settings
 from app.llm.langchain_model import get_langchain_model
@@ -32,7 +33,7 @@ def scenarios():
     }
 
 
-RATE_LIMIT_WAITS = (20, 45, 90)
+RATE_LIMIT_WAITS = (20, 45, 90, 150)
 
 
 def _is_rate_limit(exc: Exception) -> bool:
@@ -78,12 +79,16 @@ def main() -> int:
         rows.append({"scenario": name, "tool_correctness": metric.score, "success": metric.success,
                      "tools_called": sorted(called), "reads_return_expected_data": read_out_ok,
                      "risk_saves_accepted": len(saved_ok), "verdict": result.verdict,
+                     "risk_titles": [r.title for r in store.agent_risks],
+                     "review": {k: v for k, v in (store.snapshot(snap["project"]["id"], snap["_version_id"]).get("review") or {}).items()
+                                if k in ("confidence", "recommendation", "open_questions", "findings")},
                      "review_source": result.review_source, "stopped": result.stopped_reason,
                      "tokens": result.tokens_in + result.tokens_out})
         print(rows[-1])
-        time.sleep(5)  # stay under the provider's tokens-per-minute window between scenarios
+        time.sleep(15)  # stay under the provider's tokens-per-minute window between scenarios
     RESULTS.parent.mkdir(exist_ok=True)
-    RESULTS.write_text(json.dumps({"model": settings.model_llm, "prompt_version": "agent4_v1", "rows": rows}, indent=2))
+    RESULTS.write_text(json.dumps({"model": settings.model_llm, "prompt_version": agent4_plan.PROMPT_VERSION,
+                                   "rows": rows}, indent=2))
     print("saved", RESULTS)
     return 0 if all(r["success"] for r in rows) else 1
 

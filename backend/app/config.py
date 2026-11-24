@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     model_llm: str = "openai/gpt-oss-120b"
     model_judge_eval: str = "openai/gpt-oss-120b"
     llm_max_attempts: int = 3
+    # Client-side retries for 429/5xx inside one model call. The OpenAI-compatible client honours
+    # Retry-After, which is what makes a free Groq tier (8k TPM) usable: a retry waits ~20s instead of
+    # restarting the whole agent loop (and re-spending the tokens that caused the limit).
+    llm_max_retries: int = 4
     llm_max_output_tokens: int = 4096
     llm_timeout_seconds: int = 60
 

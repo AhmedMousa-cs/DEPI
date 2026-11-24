@@ -16,6 +16,9 @@ node_modules/
 pgdata/
 uploads/
 
+# eval run logs (results JSON is committed)
+evals/results/*.log
+
 # editors / os
 .vscode/
 .idea/

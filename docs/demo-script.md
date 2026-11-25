@@ -54,7 +54,7 @@ then review again. Two minutes, before the audience.
 
 ## Act 2 · Create the project (1.5 min)
 
-1. **Projects → New project**.
+1. **Projects** → **+ New project**.
 2. Name: `Clinic Appointment Booking`.
 3. Paste the brief from `docs/project-a-brief.md`.
 4. Save, then **Sources** tab → upload `demo_data/project-a-transcript.txt`.
@@ -103,7 +103,8 @@ then review again. Two minutes, before the audience.
 1. **Schedule** tab → **Run Agent 3**.
 2. Show the **critical path** chain, **conflicts** and **capacity** (overloaded members).
 3. Show the **explanation** (LLM prose) next to the numbers (code).
-4. **Approve & write dates**.
+4. Do **not** approve here yet. The plan gate in Act 7 approves the whole plan as one versioned
+   decision and writes these same dates.
 
 > "The dates come from CPM in Python. The model only writes the explanation — it cannot move a date."
 
@@ -132,7 +133,8 @@ Fallback: **Automatic checks only** — same panel, `source=rules`, zero tokens.
 
 ## Act 8 · Delivery tracking + Gantt (1 min)
 
-1. **Schedule** tab: the Gantt now has real bars (done = green, critical = orange, overdue = dashed).
+1. **Schedule** tab: the gate just wrote the dates, so the Gantt has real bars
+   (done = green, critical = orange, overdue = dashed).
 2. On a task: **▶ Start** → **%** → **Done**.
 3. Chips update (overall %, done/total, in progress, overdue).
 4. Go back to **Portfolio**: the project card reflects the new progress immediately.

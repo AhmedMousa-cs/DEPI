@@ -44,9 +44,9 @@ jobs:
       LLM_REQUIRE_PRICING: "false"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -72,9 +72,9 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -88,7 +88,15 @@ jobs:
       # Golden projects A/B/C, the scheduling pipeline and the Agent 4 tool-correctness
       # suite. All deterministic: no API key, no network.
       - name: Run golden evals
-        run: PYTHONPATH=backend python -m pytest evals/tests -q
+        run: |
+          set +e
+          PYTHONPATH=backend python -m pytest evals/tests -q --tb=short 2>&1 | tee /tmp/evals.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            failures=$(grep -E '^(FAILED|ERROR)' /tmp/evals.log | head -8 | tr '\n' ';')
+            echo "::error title=Deterministic evals failed::${failures:-see the step log}"
+          fi
+          exit "$status"
 
   frontend:
     name: Frontend syntax
@@ -96,9 +104,9 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
 

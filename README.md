@@ -160,6 +160,7 @@ make test
 cd backend && python -m pytest -q
 
 # Deterministic golden evals (no API key, no network)
+# needs the eval extras once: pip install -r evals/requirements.txt
 make eval-check
 
 # Live evals (needs GROQ_API_KEY; free tier is rate-limited)

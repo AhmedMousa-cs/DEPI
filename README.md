@@ -1,5 +1,7 @@
 ﻿# NEXUS — Project Intelligence Platform
 
+[![CI](https://github.com/AhmedMousa-cs/DEPI/actions/workflows/ci.yml/badge.svg)](https://github.com/AhmedMousa-cs/DEPI/actions/workflows/ci.yml)
+
 NEXUS turns a project brief and meeting transcripts into an **approved, dated and tracked plan** —
 without ever letting an LLM change the plan behind the project manager's back.
 

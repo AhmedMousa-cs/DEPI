@@ -1,1 +1,5 @@
-deepeval
+# Deterministic evals only: no judge LLM is called, so no API key is needed.
+# Pinned below 5: deepeval 4.x is the tested API (ToolCorrectnessMetric with a NoJudge model),
+# and deepeval < 4 crashes at import against current sentry-sdk ("Unknown option
+# 'profiles_sample_rate'"), so the range matters.
+deepeval>=4.3,<5

@@ -1,18 +1,13 @@
-"""PM review of Agent 3 output: the schedule draft.
-
-The agent saves a DRAFT (services/scheduling.py); approving it is the only way tasks.start/end get
-their dates, it records an audit row, and skips PM-locked tasks. Everything here is PM-only.
-"""
+"""PM-only schedule previews from Agent 3. Publication happens in Plan Review."""
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.common import get_project_or_404
 from app.auth.dependencies import require_role
-from app.db.models import ScheduleDraft, User
+from app.db.models import User
 from app.db.session import get_db
-from app.schemas.scheduling import ScheduleDecision, ScheduleDraftOut
-from app.services.scheduling import approve_schedule, latest_schedule_draft
+from app.schemas.scheduling import ScheduleDraftOut
+from app.services.scheduling import latest_schedule_draft
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["scheduling"])
 
@@ -31,27 +26,16 @@ def get_schedule(
     return draft
 
 
-@router.post("/scheduling/{draft_id}/decision", response_model=ScheduleDraftOut)
+@router.post("/scheduling/{draft_id}/decision", deprecated=True, status_code=410)
 def decide_schedule(
     project_id: int,
     draft_id: int,
-    body: ScheduleDecision,
     db: Session = Depends(get_db),
     user: User = Depends(require_role("PM")),
 ):
+    """Direct callers of the retired endpoint to the versioned approval flow."""
     get_project_or_404(db, project_id)
-    draft = db.scalar(
-        select(ScheduleDraft).where(ScheduleDraft.id == draft_id, ScheduleDraft.project_id == project_id)
-    )
-    if draft is None:
-        raise HTTPException(404, "Schedule draft not found")
-    if draft.review_status != "draft":
-        raise HTTPException(409, f"This draft was already decided ({draft.review_status}).")
-    latest = latest_schedule_draft(db, project_id)
-    if latest is not None and latest.id != draft.id:
-        raise HTTPException(409, "A newer draft exists: decide on the latest one.")
-
-    draft = approve_schedule(db, draft=draft, pm_id=user.id, decision=body.decision, comment=body.comment)
-    db.commit()
-    db.refresh(draft)
-    return draft
+    raise HTTPException(410, {
+        "code": "schedule_decision_retired",
+        "message": "Schedule decisions have moved to Plan Review. Review and decide the plan version there.",
+    })

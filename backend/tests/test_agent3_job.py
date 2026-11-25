@@ -1,19 +1,18 @@
 """Agent 3 as a job: the LLM step is replaced by a fake, queue/DB/audit/persistence are real.
 
 Flow under test: the agent2 fake creates real tasks (save_draft_plan), the PM approves them,
-then agent3.schedule computes a DRAFT schedule. Draft-only: task dates change only through PM
-approval of the schedule, and only PM-approved tasks get dated (locked_by_pm marks any
+then agent3.schedule computes a DRAFT schedule. Task dates change only through PM
+approval of the reviewed plan version, and only PM-approved tasks get dated (locked_by_pm marks any
 PM-decided row and does not block dating; drafts and rejected tasks stay undated).
 """
-from sqlalchemy import select
-
 from app.agents.agent3_schedule import ScheduleExplanation
 from app.agents import agent2_plan
-from app.db.models import ScheduleDraft, TeamMember
+from app.agents.agent4_testing import ScriptedChatModel, happy_path_script
+from app.db.models import Project, ScheduleDraft, Task, TeamMember
 from app.db.session import SessionLocal
 from app.llm.runner import StructuredRun
 from app.services.jobs import process_one
-from helpers import audit_rows, client, make_project, pm_headers, tl_headers
+from helpers import assign_tl, audit_rows, client, make_project, pm_headers, tl_headers
 
 from test_agent2_job import fake_plan, seed_approved, set_status
 
@@ -80,6 +79,23 @@ def schedule(monkeypatch, pm, pid, status="planning"):
     return job, client.get(f"/projects/{pid}/scheduling", headers=pm)
 
 
+def review_plan(monkeypatch, pm, pid, version=1):
+    model = ScriptedChatModel(script=happy_path_script(risks=[], verdict="ready"))
+    monkeypatch.setattr("app.llm.langchain_model.get_langchain_model", lambda *a, **kw: model)
+    assert process_one()  # Agent 3 queued the review for this plan version.
+    response = client.get(f"/projects/{pid}/plan/versions/{version}", headers=pm)
+    assert response.status_code == 200, response.text
+    assert response.json()["snapshot"]["review"]
+    return response.json()
+
+
+def approve_plan(pm, pid, plan):
+    acknowledgement = {}
+    if plan["warnings"]:
+        acknowledgement = {"acknowledge_warnings": True, "warnings_token": plan["warnings_token"]}
+    return client.post(f"/projects/{pid}/plan/versions/{plan['version']}/approve", json=acknowledgement, headers=pm)
+
+
 def test_schedule_job_creates_a_draft_and_touches_no_task_dates(monkeypatch):
     pm = pm_headers()
     pid = make_project(pm)["id"]
@@ -112,7 +128,7 @@ def test_schedule_job_creates_a_draft_and_touches_no_task_dates(monkeypatch):
     assert after["critical_path"] == list(draft["payload"]["schedule"]["critical_path"])
 
 
-def test_pm_approval_writes_dates_including_edited_tasks(monkeypatch):
+def test_only_the_reviewed_plan_can_write_gantt_dates_including_edited_tasks(monkeypatch):
     pm = pm_headers()
     pid = make_project(pm)["id"]
     tasks = plan_tasks(monkeypatch, pm, pid)
@@ -129,37 +145,46 @@ def test_pm_approval_writes_dates_including_edited_tasks(monkeypatch):
 
     job, resp = schedule(monkeypatch, pm, pid)
     assert job["status"] == "done" and resp.status_code == 200
-    draft_id = resp.json()["id"]
+    schedule_draft = resp.json()
+    plan_url = f"/projects/{pid}/plan/versions/1"
+    project_url = f"/projects/{pid}"
+    before_plan = client.get(plan_url, headers=pm).json()
+    before_project = client.get(project_url, headers=pm).json()
+    before_tasks = client.get(f"{project_url}/tasks", headers=pm).json()
+    for decision in ("approved", "rejected"):
+        retired = client.post(
+            f"{project_url}/scheduling/{schedule_draft['id']}/decision",
+            json={"decision": decision, "comment": "legacy client"}, headers=pm,
+        )
+        assert retired.status_code == 410, retired.text
+        assert retired.json()["detail"]["code"] == "schedule_decision_retired"
+    assert client.post(f"{project_url}/scheduling/99999/decision", headers=pm).status_code == 410
+    assert client.post(f"/projects/99999/scheduling/{schedule_draft['id']}/decision", headers=pm).status_code == 404
+    assert client.get(plan_url, headers=pm).json() == before_plan
+    assert client.get(project_url, headers=pm).json() == before_project
+    assert client.get(f"{project_url}/scheduling", headers=pm).json() == schedule_draft
+    assert client.get(f"{project_url}/tasks", headers=pm).json() == before_tasks
+    assert all(t["start"] is None and t["end"] is None for t in before_tasks)
+    assert not audit_rows("schedule.approved") and not audit_rows("schedule.rejected")
 
-    r = client.post(
-        f"/projects/{pid}/scheduling/{draft_id}/decision",
-        json={"decision": "approved", "comment": "dates look fine"},
-        headers=pm,
-    )
+    plan = review_plan(monkeypatch, pm, pid)
+    r = approve_plan(pm, pid, plan)
     assert r.status_code == 200, r.text
-    assert r.json()["review_status"] == "approved"
+    assert r.json()["status"] == "approved" and r.json()["tasks_applied"] == 2
 
-    now = client.get(f"/projects/{pid}/tasks", headers=pm).json()
-    dated = next(t for t in now if t["id"] == free["id"])
-    also_dated = next(t for t in now if t["id"] == edited["id"])
-    assert dated["start"] is not None and dated["end"] is not None
-    assert dated["end"] >= dated["start"]
-    # the CPM verdict travels with the dates, so the Gantt can draw critical bars
-    scheduled = {str(t["id"]): t for t in resp.json()["payload"]["schedule"]["tasks"]}
-    assert dated["is_critical"] is scheduled[str(free["id"])]["is_critical"]
-    # a PM-edited task keeps its own decision but still gets its dates from the approved schedule
-    assert also_dated["start"] is not None and also_dated["locked_by_pm"] is True
-
-    after = audit_rows("schedule.approved")[0].after
-    assert after["tasks_dated"] == 2
-
-    # a decided draft cannot be decided again
-    r2 = client.post(
-        f"/projects/{pid}/scheduling/{draft_id}/decision",
-        json={"decision": "approved"},
-        headers=pm,
-    )
-    assert r2.status_code == 409
+    now = {t["id"]: t for t in client.get(f"{project_url}/tasks", headers=pm).json()}
+    scheduled = {str(t["id"]): t for t in schedule_draft["payload"]["schedule"]["tasks"]}
+    for task_id in (free["id"], edited["id"]):
+        actual = now[task_id]
+        expected = scheduled[str(task_id)]
+        assert actual["review_status"] == "approved" and actual["locked_by_pm"] is True
+        assert (actual["start"], actual["end"], actual["is_critical"]) == (
+            expected["start_date"], expected["end_date"], expected["is_critical"],
+        )
+    assert now[edited["id"]]["title"] == "Build the booking form (PM edited)"
+    assert approve_plan(pm, pid, plan).status_code == 409
+    assert client.post(f"{plan_url}/reject", json={"comment": "too late"}, headers=pm).status_code == 409
+    assert len(audit_rows("plan.approved")) == 1
 
 
 def test_approval_never_dates_draft_or_rejected_tasks(monkeypatch):
@@ -175,44 +200,42 @@ def test_approval_never_dates_draft_or_rejected_tasks(monkeypatch):
     assert r.status_code == 200
     approved_task = tasks["Build the booking form"]
     rejected_task = tasks["Test the booking flow"]
+    with SessionLocal() as s:
+        task = s.get(Task, approved_task["id"])
+        extra = Task(project_id=pid, story_id=task.story_id, title="Draft follow-up", estimate_hours=2)
+        s.add(extra)
+        s.commit()
+        draft_task_id = extra.id
 
     job, resp = schedule(monkeypatch, pm, pid)
     assert job["status"] == "done" and resp.status_code == 200
-    draft_id = resp.json()["id"]
-    r = client.post(
-        f"/projects/{pid}/scheduling/{draft_id}/decision", json={"decision": "approved"}, headers=pm
-    )
-    assert r.status_code == 200
+    r = approve_plan(pm, pid, review_plan(monkeypatch, pm, pid))
+    assert r.status_code == 200, r.text
+    assert r.json()["tasks_applied"] == 1
 
     now = {t["id"]: t for t in client.get(f"/projects/{pid}/tasks", headers=pm).json()}
     assert now[approved_task["id"]]["start"] is not None
-    assert now[rejected_task["id"]]["start"] is None  # rejected work never gets dates
+    assert now[rejected_task["id"]]["review_status"] == "rejected"
+    assert now[draft_task_id]["review_status"] == "draft"
+    assert all(now[tid]["start"] is None and now[tid]["end"] is None for tid in (rejected_task["id"], draft_task_id))
 
 
-def test_reject_requires_a_comment(monkeypatch):
+def test_rejecting_the_reviewed_plan_leaves_schedule_dates_unchanged(monkeypatch):
     pm = pm_headers()
     pid = make_project(pm)["id"]
     tasks = plan_tasks(monkeypatch, pm, pid)
     approve_tasks(pm, pid, tasks)
     job, resp = schedule(monkeypatch, pm, pid)
     assert job["status"] == "done" and resp.status_code == 200
-    draft_id = resp.json()["id"]
+    plan = review_plan(monkeypatch, pm, pid)
+    decision_url = f"/projects/{pid}/plan/versions/{plan['version']}/reject"
 
-    r = client.post(
-        f"/projects/{pid}/scheduling/{draft_id}/decision",
-        json={"decision": "rejected", "comment": ""},
-        headers=pm,
-    )
-    assert r.status_code == 422  # validation: a comment is required when rejecting
-    r = client.post(
-        f"/projects/{pid}/scheduling/{draft_id}/decision",
-        json={"decision": "rejected", "comment": "conflicts first"},
-        headers=pm,
-    )
-    assert r.status_code == 200 and r.json()["review_status"] == "rejected"
-    # rejection writes no dates
+    assert client.post(decision_url, json={"comment": ""}, headers=pm).status_code == 422
+    r = client.post(decision_url, json={"comment": "conflicts first"}, headers=pm)
+    assert r.status_code == 200 and r.json()["status"] == "rejected"
+    assert approve_plan(pm, pid, plan).status_code == 409
     rows = client.get(f"/projects/{pid}/tasks", headers=pm).json()
-    assert all(t["start"] is None for t in rows)
+    assert all(t["start"] is None and t["end"] is None for t in rows)
 
 
 def test_job_refuses_when_the_plan_is_not_approved(monkeypatch):
@@ -240,10 +263,12 @@ def test_new_draft_supersedes_the_previous_one(monkeypatch):
     pid = make_project(pm)["id"]
     tasks = plan_tasks(monkeypatch, pm, pid)
     approve_tasks(pm, pid, tasks)
-    first_job, first = schedule(monkeypatch, pm, pid)
+    _, first = schedule(monkeypatch, pm, pid)
     assert first.status_code == 200
     first_id = first.json()["id"]
-    second_job, second = schedule(monkeypatch, pm, pid)
+    model = ScriptedChatModel(script=happy_path_script(risks=[], verdict="ready"))
+    monkeypatch.setattr("app.llm.langchain_model.get_langchain_model", lambda *a, **kw: model)
+    _, second = schedule(monkeypatch, pm, pid)
     assert second.status_code == 200
     assert second.json()["id"] != first_id
 
@@ -251,13 +276,15 @@ def test_new_draft_supersedes_the_previous_one(monkeypatch):
         old = s.get(ScheduleDraft, first_id)
         assert old.review_status == "superseded"
 
-    # deciding on the superseded draft is refused
     r = client.post(
         f"/projects/{pid}/scheduling/{first_id}/decision",
         json={"decision": "approved"},
         headers=pm,
     )
-    assert r.status_code == 409
+    assert r.status_code == 410
+    with SessionLocal() as s:
+        assert s.get(ScheduleDraft, first_id).review_status == "superseded"
+        assert s.get(Project, pid).status == "plan_review"
 
 
 def test_team_leader_cannot_see_or_decide_the_schedule(monkeypatch):
@@ -265,6 +292,11 @@ def test_team_leader_cannot_see_or_decide_the_schedule(monkeypatch):
     pid = make_project(pm)["id"]
     tasks = plan_tasks(monkeypatch, pm, pid)
     approve_tasks(pm, pid, tasks)
-    job, _ = schedule(monkeypatch, pm, pid)
+    job, draft = schedule(monkeypatch, pm, pid)
     assert job["status"] == "done"
-    assert client.get(f"/projects/{pid}/scheduling", headers=tl_headers()).status_code == 403
+    assign_tl(pid)
+    tl = tl_headers()
+    assert client.get(f"/projects/{pid}/scheduling", headers=tl).status_code == 403
+    assert client.post(
+        f"/projects/{pid}/scheduling/{draft.json()['id']}/decision", json={"decision": "approved"}, headers=tl,
+    ).status_code == 403

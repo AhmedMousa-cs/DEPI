@@ -524,12 +524,7 @@ class CoverageReport(Base):
 
 
 class ScheduleDraft(Base):
-    """Agent 3 draft schedule (M6.1).
-
-    The agent computes dates/conflicts/capacity and stores them HERE as a draft.
-    tasks.start / tasks.end are written only when the PM approves a draft; agents
-    never write the shared task rows directly.
-    """
+    """Read-only preview of Agent 3 dates, conflicts, and capacity for the PM."""
 
     __tablename__ = "schedule_drafts"
 

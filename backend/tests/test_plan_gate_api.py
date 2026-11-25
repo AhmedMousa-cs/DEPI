@@ -3,6 +3,8 @@
 The rule under test: a plan becomes 'approved' ONLY after a real approval by an authenticated PM,
 through the gate, with every precondition re-checked inside the write.
 """
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from sqlalchemy import select, text
 
@@ -96,7 +98,7 @@ def test_full_flow_draft_review_gate_then_pm_approval(monkeypatch):
 
     detail = client.get(f"{base(pid)}/versions/{v}", headers=pm).json()
     assert detail["status"] == "draft" and detail["snapshot"]["review"]["verdict"] == "ready"
-    assert detail["warnings"] == [] and len(detail["risks"]) >= 1
+    assert detail["warnings"] == [] and detail["warnings_token"] is None and len(detail["risks"]) >= 1
 
     r = approve(pm, pid, v, comment="Looks good")
     assert r.status_code == 200, r.text
@@ -202,18 +204,81 @@ def test_approving_twice_is_refused(monkeypatch):
     assert len(audit_rows("plan.approved")) == 1
 
 
+def test_locked_plan_input_returns_a_retryable_conflict_and_keeps_the_gate_open(monkeypatch):
+    pm, pid, data = new_project()
+    version = reviewed(monkeypatch, pm, pid, data)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with SessionLocal() as writer:
+            assert writer.scalar(select(Task.id).where(Task.id == data["task_ids"][0]).with_for_update())
+            refused = pool.submit(approve, pm, pid, version).result(timeout=15)
+            assert refused.status_code == 409, refused.text
+            assert refused.json()["detail"]["code"] == "inputs_busy"
+
+    assert gate_state(pid, version) == "waiting_for_pm"
+    assert version_row(pid, version).status == "draft"
+    assert all(t.start is None and t.end is None for t in tasks(pid))
+    assert not audit_rows("plan.approved")
+    approved = approve(pm, pid, version)
+    assert approved.status_code == 200, approved.text
+    assert len(audit_rows("plan.approved")) == 1
+
+
 def test_warnings_must_be_acknowledged_and_a_refusal_does_not_close_the_gate(monkeypatch):
     pm, pid, data = new_project()
     t_ui, ahmed = data["task_ids"][2], data["member_ids"][0]
     v = reviewed(monkeypatch, pm, pid, data, overrides=[{"task_id": t_ui, "assignee_member_id": ahmed}])
     detail = client.get(f"{base(pid)}/versions/{v}", headers=pm).json()
     assert any("resource conflict" in w for w in detail["warnings"])
-    r = approve(pm, pid, v)
-    assert r.status_code == 409 and r.json()["detail"]["code"] == "warnings_not_acknowledged"
-    assert r.json()["detail"]["warnings"]
+    assert detail["warnings_token"]
+    for body, expected_code in (({}, "warnings_not_acknowledged"), ({"acknowledge_warnings": True}, "warnings_changed")):
+        r = approve(pm, pid, v, **body)
+        assert r.status_code == 409, r.text
+        failure = r.json()["detail"]
+        assert failure["code"] == expected_code
+        assert (failure["warnings"], failure["warnings_token"]) == (detail["warnings"], detail["warnings_token"])
     assert gate_state(pid, v) == "waiting_for_pm" and version_row(pid, v).status == "draft"
-    assert approve(pm, pid, v, acknowledge_warnings=True).status_code == 200
-    assert audit_rows("plan.approved")[0].after["acknowledged_warnings"]
+    r = approve(pm, pid, v, acknowledge_warnings=True, warnings_token=detail["warnings_token"])
+    assert r.status_code == 200, r.text
+    assert audit_rows("plan.approved")[0].after["acknowledged_warnings"] == detail["warnings"]
+
+
+def test_review_changes_require_a_fresh_warning_acknowledgement(monkeypatch):
+    pm, pid, data = new_project()
+    t_ui, ahmed = data["task_ids"][2], data["member_ids"][0]
+    version = reviewed(monkeypatch, pm, pid, data, overrides=[{"task_id": t_ui, "assignee_member_id": ahmed}])
+    url = f"{base(pid)}/versions/{version}"
+    before = client.get(url, headers=pm).json()
+    assert before["warnings"] and before["warnings_token"]
+
+    model = ScriptedChatModel(script=happy_path_script(risks=[], verdict="ready", summary="Revised evidence summary."))
+    monkeypatch.setattr("app.llm.langchain_model.get_langchain_model", lambda *a, **k: model)
+    r = client.post(f"{base(pid)}/review", headers=pm)
+    assert r.status_code == 202, r.text
+    assert process_one()
+    after = client.get(url, headers=pm).json()
+    assert "Revised evidence summary." in after["snapshot"]["review"]["summary"]
+    assert after["warnings"] == before["warnings"]
+    assert after["warnings_token"] and after["warnings_token"] != before["warnings_token"]
+
+    r = approve(pm, pid, version, acknowledge_warnings=True, warnings_token=before["warnings_token"])
+    assert r.status_code == 409, r.text
+    failure = r.json()["detail"]
+    assert failure["code"] == "warnings_changed"
+    assert (failure["warnings"], failure["warnings_token"]) == (after["warnings"], after["warnings_token"])
+    assert gate_state(pid, version) == "waiting_for_pm" and version_row(pid, version).status == "draft"
+    assert all(t.start is None and t.end is None for t in tasks(pid))
+
+    with SessionLocal() as s:
+        refused = plan_approval.approve_plan(
+            s, project_id=pid, version=version, decided_by=1, comment="stale review", acknowledge_warnings=True,
+            warnings_token=before["warnings_token"],
+        )
+        s.commit()
+    assert refused["written"] is False and refused["code"] == "warnings_changed"
+
+    r = approve(pm, pid, version, acknowledge_warnings=True, warnings_token=after["warnings_token"])
+    assert r.status_code == 200, r.text
+    assert len(audit_rows("plan.approved")) == 1
 
 
 def test_changed_inputs_block_approval_of_a_stale_draft(monkeypatch):
@@ -226,6 +291,51 @@ def test_changed_inputs_block_approval_of_a_stale_draft(monkeypatch):
     assert r.status_code == 409 and r.json()["detail"]["code"] == "inputs_changed"
     assert version_row(pid, v).status == "draft" and all(t.start is None for t in tasks(pid))
     assert gate_state(pid, v) == "waiting_for_pm"
+
+
+@pytest.mark.parametrize(("field", "value"), [("start_date", "2026-11-02"), ("end_date", "2026-12-05")])
+def test_project_date_changes_require_rebuilding_the_draft(monkeypatch, field, value):
+    pm, pid, data = new_project()
+    version = reviewed(monkeypatch, pm, pid, data)
+    updated = client.patch(f"/projects/{pid}", json={field: value}, headers=pm)
+    assert updated.status_code == 200 and updated.json()[field] == value
+
+    r = approve(pm, pid, version)
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "inputs_changed"
+    assert version_row(pid, version).status == "draft" and gate_state(pid, version) == "waiting_for_pm"
+    assert all(t.start is None and t.end is None for t in tasks(pid))
+    assert not audit_rows("plan.approved")
+
+    rebuilt = reviewed(monkeypatch, pm, pid, data)
+    assert rebuilt != version
+    detail = client.get(f"{base(pid)}/versions/{rebuilt}", headers=pm).json()
+    assert detail["snapshot"]["project"][field] == value
+    assert approve(pm, pid, rebuilt).status_code == 200
+
+
+@pytest.mark.parametrize("change_project_date", [False, True])
+def test_legacy_draft_uses_its_stored_project_dates(monkeypatch, change_project_date):
+    pm, pid, data = new_project()
+    version = reviewed(monkeypatch, pm, pid, data)
+    with SessionLocal() as db:
+        draft = pvs.get_version(db, pid, version)
+        snapshot = dict(draft.snapshot)
+        snapshot.pop("inputs_fingerprint_version")
+        snapshot["inputs_fingerprint"] = pvs.inputs_fingerprint(pvs.load_plan_inputs(db, pid), version=1)
+        draft.snapshot = snapshot
+        db.commit()
+    if change_project_date:
+        updated = client.patch(f"/projects/{pid}", json={"end_date": "2026-12-05"}, headers=pm)
+        assert updated.status_code == 200
+
+    response = approve(pm, pid, version)
+    if change_project_date:
+        assert response.status_code == 409 and response.json()["detail"]["code"] == "inputs_changed"
+        assert all(task.start is None for task in tasks(pid))
+    else:
+        assert response.status_code == 200, response.text
+        assert all(task.start is not None for task in tasks(pid))
+    assert version_row(pid, version).snapshot == snapshot
 
 
 def test_a_superseded_draft_can_not_be_approved(monkeypatch):

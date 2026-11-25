@@ -13,13 +13,14 @@ RISK = {"title": "API is the bottleneck", "description": "Both backend tasks sit
         "severity": "medium", "likelihood": "medium", "mitigation": "Pair up.",
         "evidence_refs": [{"type": "task", "id": "12"}, {"type": "member", "id": "101"}]}
 REVIEW = {"verdict": "needs_attention", "summary": "Ahmed is double booked.", "findings": ["conflict on Ahmed"]}
+REVIEW_SAVED = {"saved": True, "verdict": "needs_attention", "notes": []}
 
 
 def expected_happy(snapshot, store):
     return expected_reads(snapshot, store) + [
         ToolCall(name="save_draft_risks", input_parameters={"risks": [RISK]},
                  output={"saved": 1, "skipped_duplicates": 0, "risk_ids": [1]}),
-        ToolCall(name="save_plan_review", input_parameters=REVIEW, output={"saved": True, "verdict": "needs_attention"}),
+        ToolCall(name="save_plan_review", input_parameters=REVIEW, output=REVIEW_SAVED),
     ]
 
 
@@ -58,7 +59,7 @@ def test_a_retry_after_invalid_evidence_is_scored_as_the_expected_two_step_flow(
             "saved": 0, "errors": ["risk 'API is the bottleneck': evidence task:999 does not exist in this plan/project"]}),
         ToolCall(name="save_draft_risks", input_parameters={"risks": [RISK]},
                  output={"saved": 1, "skipped_duplicates": 0, "risk_ids": [1]}),
-        ToolCall(name="save_plan_review", input_parameters=REVIEW, output={"saved": True, "verdict": "needs_attention"}),
+        ToolCall(name="save_plan_review", input_parameters=REVIEW, output=REVIEW_SAVED),
     ]
     assert evaluate(result, expected)[0] == 1.0
 
@@ -114,5 +115,5 @@ def test_clean_plan_flow_also_scores_perfectly():
               tool_msg(("save_plan_review", review)), final_msg()]
     result, store = run_scenario(snap, script)
     expected = expected_reads(snap, store) + [
-        ToolCall(name="save_plan_review", input_parameters=review, output={"saved": True, "verdict": "ready"})]
+        ToolCall(name="save_plan_review", input_parameters=review, output={"saved": True, "verdict": "ready", "notes": []})]
     assert evaluate(result, expected)[0] == 1.0

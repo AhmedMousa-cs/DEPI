@@ -125,6 +125,15 @@ const AR = {
   "Not stated": "غير مذكورة",
   "Automatic checks": "الفحوصات التلقائية",
   "Automatic checks only": "الفحص التلقائي فقط",
+  "More": "المزيد",
+  "More actions": "إجراءات إضافية",
+  "Agent 4 is reviewing this draft now…": "Agent 4 بيراجع المسودة دلوقتي…",
+  "Reload the version details to continue.": "أعد تحميل تفاصيل النسخة للمتابعة.",
+  "Agent 4 has not reviewed this draft yet. Run the review before opening the gate.": "Agent 4 لسه ما راجعش المسودة. شغّل المراجعة قبل فتح البوابة.",
+  "The gate is open: approve to write the dates, or reject to archive the draft.": "البوابة مفتوحة: اعتمد لكتابة التواريخ، أو ارفض لأرشفة المسودة.",
+  "Reviewed. Open the approval gate when you are ready to decide.": "تمت المراجعة. افتح بوابة الاعتماد لما تكون جاهز للقرار.",
+  "Review with Agent 4 again": "مراجعة تانية بـ Agent 4",
+  "Re-run Agent 3": "إعادة تشغيل Agent 3",
   "Run automatic checks": "تشغيل الفحص التلقائي",
   "Runs only the deterministic checks (no LLM): instant, free, and always available when the model is rate-limited.": "يشغّل الفحوصات التلقائية فقط بدون LLM: فوري ومجاني ومتاح دائمًا حتى لو كان الموديل مشغولًا.",
   "Review saved from automatic checks.": "تم حفظ مراجعة من الفحوصات التلقائية.",
@@ -1761,7 +1770,45 @@ function planReviewView() {
       : t("Ask Agent 4 to review the current draft again; it replaces the stored review.");
   const jobLine = job ? `<div class="callout${job.status === "failed" ? " warning" : ""}">${t("Agent job")} #${esc(job.id)} (${esc(job.type)}): <b>${esc(job.status)}</b> (${esc(job.progress)}%)${job.error ? "<br>" + esc(job.error) : ""}</div>` : "";
   const steps = `<div class="callout" style="margin-top:10px"><b>${t("How it works")}</b><br>${t("1. Run Agent 3: it schedules the approved tasks and saves a draft version. 2. Agent 4 reviews that draft automatically and stores its risks. 3. Open the gate, then approve or reject the plan.")}</div>`;
-  const head = `<div class="page-head"><div><div class="eyebrow">M6-B · Agent 4</div><h1>${t("Plan review")}</h1><p>${t("One versioned snapshot of the whole plan. Agent 4 stores risks and findings; the PM approves or rejects the plan as a unit through the gate.")}</p>${steps}</div><div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end"><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-secondary btn-small" data-action="plan-refresh">${t("Refresh")}</button><button class="btn btn-secondary btn-small" data-action="plan-generate"${running || !openable ? " disabled" : ""} title="${esc(genHint)}">${t(versions.length ? "Run Agent 3 again" : "Run Agent 3")}</button><button class="btn btn-primary btn-small" data-action="plan-review"${running || !canReview ? " disabled" : ""} title="${esc(reviewHint)}">${running ? t("Working...") : t("Review with Agent 4")}</button><button class="btn btn-secondary btn-small" data-action="plan-rules-review"${running || !canReview ? " disabled" : ""} title="${esc(t("Runs only the deterministic checks (no LLM): instant, free, and always available when the model is rate-limited."))}">${t("Automatic checks only")}</button></div><p class="subtle" style="max-width:320px;text-align:end;margin:0">${esc(reviewHint)}</p></div></div>`;
+  const snap0 = (d && d.snapshot) || {};
+  const reviewed = !!snap0.review;
+  const gateState0 = gate ? gate.state : "not_started";
+  // The line under the actions explains the PRIMARY button, so the screen tells one story.
+  const nextHint = running
+    ? t("Agent 4 is reviewing this draft now…")
+    : !versions.length
+      ? genHint
+      : !d
+        ? t("Reload the version details to continue.")
+        : d.status !== "draft"
+          ? t("Only a draft can be reviewed. This version is") + " " + t(PV_LABEL[d.status] || d.status) + "."
+          : !reviewed
+            ? t("Agent 4 has not reviewed this draft yet. Run the review before opening the gate.")
+            : gateState0 === "waiting_for_pm"
+              ? t("The gate is open: approve to write the dates, or reject to archive the draft.")
+              : t("Reviewed. Open the approval gate when you are ready to decide.");
+  // One primary button = the PM's next step in the flow; everything else is a light tool below it.
+  const primary = running
+    ? `<button class="btn btn-primary btn-small" disabled>${t("Working...")}</button>`
+    : !versions.length
+      ? `<button class="btn btn-primary btn-small" data-action="plan-generate"${openable ? "" : " disabled"} title="${esc(genHint)}">${t("Run Agent 3")}</button>`
+      : !d
+        ? `<button class="btn btn-primary btn-small" data-action="plan-refresh">${t("Refresh")}</button>`
+        : d.status !== "draft"
+          ? (openable
+            ? `<button class="btn btn-primary btn-small" data-action="plan-generate" title="${esc(genHint)}">${t("Run Agent 3 again")}</button>`
+            : `<button class="btn btn-primary btn-small" disabled>${t("Review with Agent 4")}</button>`)
+          : !reviewed
+            ? `<button class="btn btn-primary btn-small" data-action="plan-review" title="${esc(reviewHint)}">${t("Review with Agent 4")}</button>`
+            : gateState0 === "waiting_for_pm"
+              ? `<button class="btn btn-primary btn-small" data-action="plan-approve">${t("Approve plan")}</button>`
+              : `<button class="btn btn-primary btn-small" data-action="plan-open-gate"${openable ? "" : " disabled"}>${t("Open approval gate")}</button>`;
+  const tools = `<details class="head-menu"><summary class="btn btn-quiet btn-small" title="${esc(t("More actions"))}">⋯ ${t("More")}</summary><div>${[
+    canReview && reviewed ? `<button class="btn btn-quiet btn-small" data-action="plan-review" title="${esc(reviewHint)}">${t("Review with Agent 4 again")}</button>` : "",
+    versions.length && openable && d && d.status === "draft" ? `<button class="btn btn-quiet btn-small" data-action="plan-generate" title="${esc(genHint)}">${t("Re-run Agent 3")}</button>` : "",
+    `<button class="btn btn-quiet btn-small" data-action="plan-refresh">${t("Refresh")}</button>`,
+  ].filter(Boolean).join("")}</div></details>`;
+  const head = `<div class="page-head"><div><div class="eyebrow">M6-B · Agent 4</div><h1>${t("Plan review")}</h1><p>${t("One versioned snapshot of the whole plan. Agent 4 stores risks and findings; the PM approves or rejects the plan as a unit through the gate.")}</p>${steps}</div><div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-end">${primary}<button class="btn btn-secondary btn-small" data-action="plan-rules-review"${running || !canReview ? " disabled" : ""} title="${esc(t("Runs only the deterministic checks (no LLM): instant, free, and always available when the model is rate-limited."))}">${t("Automatic checks only")}</button>${tools}</div><p class="subtle" style="max-width:320px;text-align:end;margin:0">${esc(nextHint)}</p></div></div>`;
   if (!versions.length) return `${head}${jobLine}<section class="card"><div class="card-body"><div class="empty"><div class="empty-icon">◈</div><h3>${t("No plan versions yet")}</h3><p>${t("Approve the work plan tasks, then run Agent 3 — each run persists a draft version that Agent 4 reviews.")}</p></div></div></section>`;
 
   const versionChips = versions.map(v => `<button class="btn ${state.planVersionSel === v.version ? "btn-primary" : "btn-secondary"} btn-small" data-action="plan-version" data-v="${v.version}">v${esc(v.version)} · ${t(PV_LABEL[v.status] || v.status)}</button>`).join(" ");

@@ -213,7 +213,7 @@ OCR; meeting recording/transcription; automatic external messages; one independe
 ### ADR-023: A plan-review screen never shows a stale job; the demo always loads the current UI
 - **Status:** Approved
 - **Context:** After an API restart the review poller stopped on its network error and left `planReviewJob` at its last snapshot (`queued`, 10%), so the PM saw "Working..." forever and could not start a review. Separately, the frontend is a static `app.js` with no cache headers; a browser kept serving an older file, so a UI fix was invisible during a demo.
-- **Decision:** On entering the Plan review tab, reconcile the stored job with `GET /projects/{id}/jobs` (a finished job replaces the stale snapshot; a missing job clears it); when a poll fails for any reason other than `unauthorized`, drop an active job and re-render instead of freezing. Load `app.js` with a per-load query string so a local/demo browser always executes the current file.
+- **Decision:** On entering the Plan review tab, reconcile the stored job with `GET /projects/{id}/jobs` (a finished job replaces the stale snapshot; a missing job clears it); when a poll fails for any reason other than `unauthorized`, drop an active job and re-render instead of freezing. Load `app.js` with a per-load query string and `styles.css` with a version query so a local/demo browser always executes the current files.
 - **Consequence:** The screen follows the server, never a client-side guess; the PM can retry immediately after a failure. The single frontend file is re-fetched on each load (negligible on localhost and guaranteed fresh for demos).
 
 ### ADR-024: Agent 4 confidence is capped by evidence, and the plan's facts are visible on their own

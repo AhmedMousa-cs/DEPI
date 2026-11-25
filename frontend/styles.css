@@ -183,6 +183,21 @@ li { margin-bottom: 4px; }
   margin-bottom: 18px;
 }
 .page-head p { color: var(--ink-soft); margin-top: 4px; max-width: 70ch; }
+/* Actions keep their natural width and never wrap mid-label (one primary + tools stay readable). */
+.page-head > div:last-child { flex: 0 0 auto; }
+.page-head .btn { white-space: nowrap; }
+/* Overflow menu: one primary action stays visible, the rest lives behind "More". */
+.head-menu { position: relative; }
+.head-menu > summary { list-style: none; cursor: pointer; }
+.head-menu > summary::-webkit-details-marker { display: none; }
+.head-menu[open] > summary { background: var(--line); }
+.head-menu > div {
+  position: absolute; inset-inline-end: 0; top: calc(100% + 6px); z-index: 30;
+  display: flex; flex-direction: column; gap: 2px; min-width: 210px; padding: 6px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(15, 35, 60, .16);
+}
+.head-menu > div .btn { justify-content: flex-start; text-align: start; width: 100%; }
 .eyebrow { color: var(--accent-dark); font-size: 12px; font-weight: 600; margin-bottom: 4px; }
 .footnote { margin-top: 18px; color: var(--ink-soft); font-size: 12px; }
 

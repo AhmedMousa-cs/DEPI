@@ -30,6 +30,7 @@ from deepeval.test_case import LLMTestCase, ToolCall, ToolCallParams  # noqa: E4
 
 from app.agents import agent4_plan  # noqa: E402
 from app.agents.agent4_testing import InMemoryPlanStore, NullLedger, ScriptedChatModel  # noqa: E402
+from app.services.plan_health import plan_health  # noqa: E402
 from app.services.plan_rules import run_rules  # noqa: E402
 from app.tools.plan_tools import READ_TOOL_NAMES  # noqa: E402
 
@@ -92,6 +93,7 @@ def expected_reads(snapshot: dict, store: InMemoryPlanStore) -> list[ToolCall]:
                         "available_to": extra["available_to"]})
     return [
         ToolCall(name="get_project_brief", input_parameters={}, output=store.brief(1)),
+        ToolCall(name="get_plan_health", input_parameters={}, output=plan_health(snapshot)),
         ToolCall(name="get_tasks_and_dependencies", input_parameters={},
                  output={"items": tasks, "truncated": False, "total": len(tasks)}),
         ToolCall(name="get_agent3_results", input_parameters={}, output={

@@ -62,8 +62,8 @@ def final_msg(text: str = "Review saved.", tokens: tuple[int, int] = (300, 10)) 
                                                    "total_tokens": sum(tokens)})
 
 
-READ_ALL = ("get_project_brief", "get_agent3_results", "get_tasks_and_dependencies", "get_team_capacity",
-            "get_open_risks")
+READ_ALL = ("get_plan_health", "get_project_brief", "get_agent3_results", "get_tasks_and_dependencies",
+            "get_team_capacity", "get_open_risks")
 
 
 def happy_path_script(*, risks: list[dict], verdict: str = "needs_attention",

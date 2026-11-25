@@ -85,11 +85,79 @@ def test_save_draft_risks_schema_has_no_status_field():
     assert "status" not in risk and {"severity", "likelihood", "evidence_refs"} <= set(risk)
 
 
+def test_get_plan_health_returns_the_deterministic_brief():
+    from app.services.plan_health import plan_health
+
+    snap = sample_snapshot()
+    out = run_tool("get_plan_health", {}, store=InMemoryPlanStore(snap))
+    assert out == plan_health(snap)
+    assert out["delivery_signal"] == "at_risk" and out["workload"][0]["name"] == "Ahmed"
+
+
+def test_save_plan_review_stores_confidence_recommendation_and_questions():
+    store = InMemoryPlanStore(sample_snapshot())
+    out = run_tool("save_plan_review", {"verdict": "needs_attention", "summary": "Ahmed is double booked.",
+                                        "findings": ["Ahmed owns 3 of 4 tasks"],
+                                        "confidence": "high", "recommendation": "approve_with_changes",
+                                        "open_questions": ["Can Sara take the UI task?"]}, store=store)
+    assert out["saved"] is True
+    review = store.snapshot(1, 1)["review"]
+    assert (review["confidence"], review["recommendation"]) == ("high", "approve_with_changes")
+    assert review["open_questions"] == ["Can Sara take the UI task?"]
+
+
+def test_a_review_without_a_recommendation_gets_the_one_matching_its_verdict():
+    store = InMemoryPlanStore(sample_snapshot())
+    run_tool("save_plan_review", {"verdict": "blocked", "summary": "Unreachable deadline."}, store=store)
+    assert store.snapshot(1, 1)["review"]["recommendation"] == "revise"
+
+
+def test_recommending_approve_with_a_non_ready_verdict_is_rejected():
+    store = InMemoryPlanStore(sample_snapshot())
+    out = run_tool("save_plan_review", {"verdict": "needs_attention", "summary": "Two serious issues.",
+                                        "recommendation": "approve"}, store=store)
+    assert out["saved"] is False and "requires verdict 'ready'" in out["errors"][0]
+    assert store.reviews == []  # nothing contradictory was written
+
+
+def test_more_than_eight_risks_is_refused_instead_of_truncated_silently():
+    store = InMemoryPlanStore(sample_snapshot())
+    risks = [{"title": f"Risk number {i}", "description": "A real description.", "severity": "low",
+              "likelihood": "low", "evidence_refs": [{"type": "task", "id": 11}]} for i in range(9)]
+    out = run_tool("save_draft_risks", {"risks": risks}, store=store)
+    assert out["saved"] == 0 and "at most 8" in out["errors"][0] and store.agent_risks == []
+
+
 def test_save_plan_review_does_not_approve_anything():
     store = InMemoryPlanStore(sample_snapshot())
     out = run_tool("save_plan_review", {"verdict": "ready", "summary": "All good.", "findings": []}, store=store)
-    assert out == {"saved": True, "verdict": "ready"}
+    assert out == {"saved": True, "verdict": "ready", "notes": []}
     assert store.snapshot(1, 1)["review"]["source"] == "agent4"
+
+
+def test_confidence_is_capped_by_the_evidence_the_plan_provides():
+    snap = sample_snapshot(target_end=None)
+    snap["tasks"][0]["assignee_member_id"] = None
+    store = InMemoryPlanStore(snap)
+    out = run_tool("save_plan_review", {"verdict": "needs_attention", "summary": "One task has no owner.",
+                                        "confidence": "high"}, store=store)
+    assert out["saved"] is True
+    review = store.snapshot(1, 1)["review"]
+    assert review["confidence"] == "medium"
+    limitations = " | ".join(review["limitations"])
+    assert "confidence lowered from high to medium" in limitations
+    assert "no target end date" in limitations and "1 task(s) have no assignee" in limitations
+    assert limitations in " | ".join(out["notes"])
+
+
+def test_a_blocked_verdict_forces_a_revise_recommendation():
+    store = InMemoryPlanStore(sample_snapshot())
+    out = run_tool("save_plan_review", {"verdict": "blocked", "summary": "The deadline is unreachable.",
+                                        "recommendation": "approve_with_changes"}, store=store)
+    assert out["saved"] is True
+    review = store.snapshot(1, 1)["review"]
+    assert review["recommendation"] == "revise"
+    assert any("forced to 'revise'" in x for x in review["limitations"])
 
 
 def test_invalid_verdict_is_rejected_before_saving():

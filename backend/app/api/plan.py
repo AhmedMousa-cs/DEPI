@@ -28,6 +28,7 @@ from app.schemas.plan import (
 )
 from app.services import plan_approval, plan_versions as pvs
 from app.services.jobs import ACTIVE_STATUSES
+from app.services.plan_health import confidence_cap, plan_health
 
 router = APIRouter(prefix="/projects/{project_id}/plan", tags=["plan"])
 PM = Depends(require_role("PM"))
@@ -121,6 +122,15 @@ def review(project_id: int, body: ReviewBody | None = None, db: Session = Depend
 
 def _gate_view(state: dict, project_id: int, version: int) -> dict:
     return {"project_id": project_id, "version": version, **state}
+
+
+@router.get("/versions/{version}/health")
+def version_health(project_id: int, version: int, db: Session = Depends(get_db), user: User = PM):
+    """Deterministic plan health for a stored version (no LLM): the facts behind a review."""
+    get_project_or_404(db, project_id)
+    pv = _version_or_404(db, project_id, version)
+    health = plan_health(pv.snapshot or {})
+    return {"version": pv.version, "health": health, "confidence_cap": confidence_cap(health)}
 
 
 @router.get("/versions/{version}/gate")

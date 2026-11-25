@@ -27,6 +27,18 @@ def test_clean_plan_has_no_findings_and_is_ready():
     assert rules_review(found, snap)["verdict"] == "ready"
 
 
+def test_rules_review_caps_its_confidence_and_reports_limitations():
+    snap = sample_snapshot(overlap=False, target_end=None)
+    snap["tasks"][2]["total_float"] = 1
+    snap["schedule"]["critical_task_ids"] = [11]
+    snap["schedule"]["critical_path"] = [11]
+    review = rules_review(run_rules(snap), snap)
+    # even a "no issues" review may not claim high confidence without a target date
+    assert review["verdict"] == "ready" and review["confidence"] == "medium"
+    assert any("no target end date" in x for x in review["limitations"])
+    assert review["recommendation"] == "approve"
+
+
 def test_deadline_exceeded_severity_depends_on_overrun():
     snap = sample_snapshot(target_end="2026-11-20")  # ends 22nd -> 2 days late
     assert rules(snap)["deadline_exceeded"].risk.severity == "high"

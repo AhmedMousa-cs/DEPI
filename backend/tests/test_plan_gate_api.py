@@ -139,7 +139,8 @@ def test_only_the_pm_can_use_the_plan_endpoints(monkeypatch):
     assign_tl(pid)
     tl = tl_headers()
     calls = [("get", "/versions"), ("get", f"/versions/{v}"), ("get", "/diff?from_version=1&to_version=1"),
-             ("get", "/risks"), ("get", f"/versions/{v}/gate"), ("post", "/generate"), ("post", "/review"),
+             ("get", "/risks"), ("get", f"/versions/{v}/health"), ("get", f"/versions/{v}/gate"),
+             ("post", "/generate"), ("post", "/review"),
              ("post", f"/versions/{v}/open-gate"), ("post", f"/versions/{v}/approve"), ("post", f"/versions/{v}/reject")]
     for method, path in calls:
         kw = {"json": {"comment": "x"}} if method == "post" else {}
@@ -154,6 +155,19 @@ def test_decided_by_can_not_be_supplied_in_the_body(monkeypatch):
     assert approve(pm, pid, v, decided_by=999).status_code == 422
     assert client.post(f"{base(pid)}/versions/{v}/reject", json={"comment": "no", "decided_by": 999}, headers=pm).status_code == 422
     assert version_row(pid, v).status == "draft"
+
+
+def test_health_endpoint_returns_the_facts_behind_the_review(monkeypatch):
+    pm, pid, data = new_project()
+    v = reviewed(monkeypatch, pm, pid, data)
+    r = client.get(f"{base(pid)}/versions/{v}/health", headers=pm)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["version"] == v
+    assert body["health"]["schedule"]["tasks"] == len(data["task_ids"])
+    # all tasks are assigned and the project has a target end date -> the evidence supports "high"
+    assert body["confidence_cap"] == {"level": "high", "reasons": []}
+    assert client.get(f"{base(pid)}/versions/99/health", headers=pm).status_code == 404
 
 
 def test_unknown_project_or_version_is_404():

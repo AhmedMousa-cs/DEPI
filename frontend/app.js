@@ -6,7 +6,7 @@ const MAX_UPLOAD = 5 * 1024 * 1024;
 const STATUS = { setup: "Setup", planning: "Planning", scope_review: "Scope review", plan_review: "Plan review", active: "Active", closed: "Closed" };
 const KIND = { brief: "Brief", transcript: "Transcript", note: "Note", file: "File" };
 
-const state = { me: null, projects: [], project: null, team: [], leaders: [], page: "portfolio", tab: "overview", modal: null, notice: null, navOpen: false, reqs: [], scope: null, gaps: null, reqFilter: "all", job: null, stories: [], tasks: [], coverage: null, planFilter: "all", planJob: null, schedule: null, scheduleJob: null, chain: null, pf: null, planVersions: [], planVersionSel: null, planVersionDetail: null, planGate: null, planReviewJob: null, theme: localStorage.getItem("nx-theme") || "light", lang: localStorage.getItem("nx-lang") || "en" };
+const state = { me: null, projects: [], project: null, team: [], leaders: [], page: "portfolio", tab: "overview", modal: null, notice: null, navOpen: false, reqs: [], scope: null, gaps: null, reqFilter: "all", job: null, stories: [], tasks: [], coverage: null, planFilter: "all", planJob: null, schedule: null, scheduleJob: null, chain: null, pf: null, planVersions: [], planVersionSel: null, planVersionDetail: null, planGate: null, planReviewJob: null, planHealth: null, planRulesOnly: false, theme: localStorage.getItem("nx-theme") || "light", lang: localStorage.getItem("nx-lang") || "en" };
 const app = document.getElementById("app");
 const isPM = () => state.me && state.me.role === "PM";
 
@@ -15,6 +15,7 @@ function esc(v) { return String(v == null ? "" : v).replace(/[&<>"']/g, c => ({ 
 function fmtDate(v) { return v ? new Date(v + "T12:00:00").toLocaleDateString(state.lang === "ar" ? "ar" : undefined, { month: "short", day: "numeric", year: "numeric" }) : t("Not set"); }
 function fmtDateTime(v) { return v ? new Date(v).toLocaleString() : ""; }
 function kv(k, v) { return `<div class="keyval"><small>${esc(k)}</small><b>${esc(v)}</b></div>`; }
+function kvHtml(k, html) { return `<div class="keyval"><small>${esc(k)}</small><b>${html}</b></div>`; }
 function field(label, inner, full) { return `<div class="field${full ? " full" : ""}"><label>${label}</label>${inner}</div>`; }
 function statusBadge(s) { return `<span class="badge ${s === "active" ? "green" : s === "closed" ? "" : "blue"}">${esc(STATUS[s] || s)}</span>`; }
 
@@ -117,9 +118,69 @@ const AR = {
   "Open approval gate": "فتح بوابة الاعتماد",
   "Agent 4 review": "مراجعة Agent 4",
   "Verdict": "الحكم",
+  "Recommendation": "التوصية (استشارية)",
+  "Confidence": "درجة الثقة",
+  "Findings": "الملاحظات",
+  "Open questions for the PM": "أسئلة مفتوحة للمدير",
+  "Not stated": "غير مذكورة",
+  "Automatic checks": "الفحوصات التلقائية",
+  "Automatic checks only": "الفحص التلقائي فقط",
+  "More": "المزيد",
+  "More actions": "إجراءات إضافية",
+  "Agent 4 is reviewing this draft now…": "Agent 4 بيراجع المسودة دلوقتي…",
+  "Reload the version details to continue.": "أعد تحميل تفاصيل النسخة للمتابعة.",
+  "Agent 4 has not reviewed this draft yet. Run the review before opening the gate.": "Agent 4 لسه ما راجعش المسودة. شغّل المراجعة قبل فتح البوابة.",
+  "The gate is open: approve to write the dates, or reject to archive the draft.": "البوابة مفتوحة: اعتمد لكتابة التواريخ، أو ارفض لأرشفة المسودة.",
+  "Reviewed. Open the approval gate when you are ready to decide.": "تمت المراجعة. افتح بوابة الاعتماد لما تكون جاهز للقرار.",
+  "Review with Agent 4 again": "مراجعة تانية بـ Agent 4",
+  "Re-run Agent 3": "إعادة تشغيل Agent 3",
+  "Run automatic checks": "تشغيل الفحص التلقائي",
+  "Runs only the deterministic checks (no LLM): instant, free, and always available when the model is rate-limited.": "يشغّل الفحوصات التلقائية فقط بدون LLM: فوري ومجاني ومتاح دائمًا حتى لو كان الموديل مشغولًا.",
+  "Review saved from automatic checks.": "تم حفظ مراجعة من الفحوصات التلقائية.",
+  "Plan health": "صحة الخطة",
+  "Plan health is not available for this version.": "صحة الخطة غير متاحة لهذه النسخة.",
+  "Computed by code from this exact snapshot — no LLM, no cost.": "محسوبة بالكود من هذه النسخة نفسها — بدون LLM وبدون تكلفة.",
+  "Delivery signal": "إشارة التسليم",
+  "On track": "على المسار",
+  "At risk": "معرّضة للخطر",
+  "Late": "متأخرة",
+  "Days late": "أيام تأخير",
+  "Days early": "أيام تبكير",
+  "Critical tasks": "المهام الحرجة",
+  "Zero-float tasks": "مهام بلا مرونة",
+  "Overloaded members": "أعضاء محمّلون فوق الطاقة",
+  "Total estimate": "إجمالي التقدير",
+  "Attention points": "نقاط انتباه",
+  "No attention points: the deterministic checks found nothing to flag.": "لا نقاط انتباه: الفحوصات التلقائية لم تجد ما يستحق التنبيه.",
+  "Evidence cap": "سقف الأدلة",
+  "The review's confidence cannot exceed this level with the data available.": "درجة ثقة المراجعة لا يمكن أن تتجاوز هذا المستوى بالبيانات المتاحة.",
+  "Limitations": "حدود المراجعة",
+  "no scheduled tasks were found": "لا توجد مهام مجدولة",
+  "the project has no target end date": "المشروع بلا تاريخ نهاية مستهدف",
+  "no team capacity data was available": "لا توجد بيانات عن طاقة الفريق",
+  "tasks have no assignee": "مهام بلا مسؤول",
+  "task(s) have no assignee": "مهمة/مهام بلا مسؤول",
+  "recommendation forced to 'revise' because the verdict is blocked": "تم إجبار التوصية على \"إعادة مراجعة\" لأن الحكم هو \"متوقفة\"",
+  "Agent 4 reads a deterministic brief, records evidence-backed risks and recommends a verdict. The automatic checks and the saved risks can raise that verdict, never lower it — and the recommendation is advice: you decide.": "يقرأ Agent 4 ملخصاً محسوباً تلقائياً، ويسجل مخاطر مدعومة بأدلة، ويوصي بحكم. الفحوصات التلقائية والمخاطر المحفوظة قد ترفع الحكم ولا تخفضه أبداً — والتوصية استشارية: القرار لك.",
+  "approve": "اعتماد",
+  "Approve": "اعتماد",
+  "Approve with changes": "اعتماد مع تعديلات",
+  "Revise first": "مراجعة قبل الاعتماد",
+  "approve_with_changes": "اعتماد مع تعديلات",
+  "revise": "إعادة مراجعة",
+  "low": "منخفضة",
+  "medium": "متوسطة",
+  "high": "عالية",
   "Likelihood": "الاحتمالية",
   "Mitigation": "التخفيف",
   "Rule": "قاعدة",
+  "ready": "جاهزة",
+  "needs_attention": "تحتاج انتباه",
+  "blocked": "متوقفة",
+  "Tasks without an assignee": "مهام بلا مسؤول",
+  "Plan finishes after the project deadline": "الخطة تنتهي بعد الموعد النهائي للمشروع",
+  "Almost no schedule slack": "لا توجد مرونة تُذكر في الجدول",
+  "Tasks assigned to people outside the project team": "مهام مسندة لأشخاص خارج فريق المشروع",
   "Agent 4": "Agent 4",
   "Planned tasks": "المهام المخططة",
   "Resource conflicts": "تعارضات الموارد",
@@ -344,6 +405,19 @@ const AR_PATTERNS = [
   [/^Analyzed (\d+) requirement\(s\)/, "تم تحليل $1 متطلب"],
   [/^(\d+) area\(s\) matched by keywords only\./, "$1 مناطق بمطابقة كلمات فقط."],
   [/^Confidence (\d+)%/, "الثقة $1%"],
+  [/^(\d+) task\(s\) have no assignee$/, "$1 مهمة بلا مسؤول"],
+  [/^confidence lowered from (\w+) to (\w+): the plan data is incomplete$/, "تم تخفيض الثقة من $1 إلى $2: بيانات الخطة غير مكتملة"],
+  [/^(\d+) of (\d+) tasks have no assignee$/, "$1 من $2 مهمة بلا مسؤول"],
+  [/^schedule ends (\d+) calendar day\(s\) after the target end date (\S+)$/, "الجدول ينتهي بعد $1 يوم من التاريخ المستهدف $2"],
+  [/^(\d+) task\(s\) start before a dependency ends or reference a missing task$/, "$1 مهمة تبدأ قبل انتهاء اعتماديتها أو تشير لمهمة غير موجودة"],
+  [/^(\d+) task\(s\) have no hour estimate$/, "$1 مهمة بلا تقدير ساعات"],
+  [/^(\d+) of (\d+) tasks are critical \((\d+)%\): no slack for slips$/, "$1 من $2 مهمة حرجة ($3%): لا مجال للتأخير"],
+  [/^(\S+) has ([\d.]+) h against ([\d.]+) h available \((\d+)%\)$/, "$1 لديه $2 ساعة مقابل $3 ساعة متاحة ($4%)"],
+  [/^Automatic checks found (\d+) issue\(s\); verdict: ready\.$/, "الفحوصات التلقائية وجدت $1 مشكلة؛ الحكم: جاهزة"],
+  [/^Automatic checks found (\d+) issue\(s\); verdict: needs_attention\.$/, "الفحوصات التلقائية وجدت $1 مشكلة؛ الحكم: تحتاج انتباه"],
+  [/^Automatic checks found (\d+) issue\(s\); verdict: blocked\.$/, "الفحوصات التلقائية وجدت $1 مشكلة؛ الحكم: متوقفة"],
+  [/^Automatic checks found no issues\.$/, "الفحوصات التلقائية لم تجد أي مشاكل."],
+  [/^the project has no target end date, so lateness cannot be measured$/, "المشروع بلا تاريخ نهاية مستهدف، لذلك لا يمكن قياس التأخير"],
 ];
 
 function t(s) { return state.lang === "ar" ? (AR[s] || s) : s; }
@@ -979,6 +1053,10 @@ Object.assign(actions, {
         const jobs = await api(`/projects/${state.project.id}/jobs`);
         const active = jobs.find(j => ["agent4.review", "agent3.schedule"].includes(j.type) && ["queued", "running"].includes(j.status));
         if (active) { state.planReviewJob = active; pollPlanReviewJob(active.id); }
+        else if (state.planReviewJob) {
+          // Never keep a stale "queued" line after a restart: reconcile with the server.
+          state.planReviewJob = jobs.find(j => j.id === state.planReviewJob.id) || null;
+        }
       } catch (e) { if (e.message === "unauthorized") throw e; }
     }
     baseTab(t);
@@ -1554,6 +1632,7 @@ const PV_LABEL = { draft: "Draft", approved: "Approved", rejected: "Rejected", s
 const RISK_BADGE = { low: "green", medium: "blue", high: "", critical: "red" };
 const RISK_STATUS = { draft: "Draft", open: "Open", dismissed: "Dismissed", superseded: "Superseded" };
 const VERDICT_VIEW = { ready: ["Ready", "green"], needs_attention: ["Needs attention", ""], blocked: ["Blocked", "red"] };
+const RECOMMENDATION_VIEW = { approve: ["Approve", "green"], approve_with_changes: ["Approve with changes", "blue"], revise: ["Revise first", "red"] };
 
 const pvBadge = s => `<span class="badge ${s === "approved" ? "green" : s === "rejected" ? "red" : s === "draft" ? "blue" : ""}">${esc(t(PV_LABEL[s] || s))}</span>`;
 
@@ -1569,14 +1648,16 @@ async function reloadPlanReview(preferDraft = false) {
     const draft = versions.find(v => v.status === "draft");
     state.planVersionSel = draft ? draft.version : (versions[0] ? versions[0].version : null);
   }
-  if (state.planVersionSel == null) { state.planVersionDetail = null; state.planGate = null; return; }
+  if (state.planVersionSel == null) { state.planVersionDetail = null; state.planGate = null; state.planHealth = null; return; }
   const v = state.planVersionSel;
-  const [detail, gate] = await Promise.all([
+  const [detail, gate, health] = await Promise.all([
     api(`/projects/${id}/plan/versions/${v}`).catch(e => { if (e.message === "unauthorized") throw e; return null; }),
     api(`/projects/${id}/plan/versions/${v}/gate`).catch(e => { if (e.message === "unauthorized") throw e; return null; }),
+    api(`/projects/${id}/plan/versions/${v}/health`).catch(e => { if (e.message === "unauthorized") throw e; return null; }),
   ]);
   state.planVersionDetail = detail;
   state.planGate = gate;
+  state.planHealth = health;
 }
 
 function pollPlanReviewJob(jobId) {
@@ -1588,6 +1669,10 @@ function pollPlanReviewJob(jobId) {
       const finished = ["done", "failed", "cancelled", "waiting_for_pm"].includes(j.status);
       if (finished) {
         clearInterval(planReviewTimer);
+        if (j.type === "agent4.review" && state.planRulesOnly) {
+          state.planRulesOnly = false;
+          if (j.status === "done") state.notice = { type: "ok", text: t("Review saved from automatic checks.") };
+        }
         // Agent 3 queues an agent4.review when it finishes: keep the screen following it.
         if (j.type === "agent3.schedule" && j.status === "done") {
           try {
@@ -1601,7 +1686,14 @@ function pollPlanReviewJob(jobId) {
         if (finished) { await reloadPlanReview(true); await reloadProject(); }
         if (!state.modal) render();
       }
-    } catch (e) { clearInterval(planReviewTimer); }
+    } catch (e) {
+      clearInterval(planReviewTimer);
+      // A dropped poll (server restart, expired token) must not leave a frozen "queued" line.
+      if (e.message !== "unauthorized" && state.planReviewJob && ["queued", "running"].includes(state.planReviewJob.status)) {
+        state.planReviewJob = null;
+        if (state.page === "project" && state.tab === "planreview" && !state.modal) render();
+      }
+    }
   };
   tick(); planReviewTimer = setInterval(tick, 3000);
 }
@@ -1625,8 +1717,32 @@ function pvReviewCard(snapshot) {
   const review = (snapshot || {}).review;
   if (!review) return `<div class="callout warning">${t("Agent 4 has not reviewed this draft yet. Run the review before opening the gate.")}</div>`;
   const v = VERDICT_VIEW[review.verdict] || [review.verdict, ""];
+  const rv = RECOMMENDATION_VIEW[review.recommendation] || [review.recommendation, "blue"];
+  const verdict = `<span class="badge ${v[1]}">${esc(t(v[0]))}</span>`;
+  const rec = review.recommendation ? `<span class="badge ${rv[1]}">${esc(t(rv[0]))}</span>` : `<span class="subtle">${esc(t("Not stated"))}</span>`;
+  const conf = `<span class="badge">${esc(t(review.confidence || "medium"))}</span>`;
   const findings = (review.findings || []).map(f => `<li>${esc(f)}</li>`).join("");
-  return `<div class="keyvals">${kv(t("Verdict"), t(v[0]))}${kv(t("Summary"), review.summary || "—")}</div>${findings ? `<ul style="margin:8px 0 0 18px;font-size:13px">${findings}</ul>` : ""}`;
+  const questions = (review.open_questions || []).map(q => `<li>${esc(q)}</li>`).join("");
+  const limitations = (review.limitations || []).map(x => `<li>${esc(x)}</li>`).join("");
+  const meta = [review.source === "rules" ? t("Automatic checks") : "Agent 4", review.reviewed_at ? fmtDateTime(review.reviewed_at) : ""].filter(Boolean).join(" · ");
+  return `<div class="keyvals">${kvHtml(t("Verdict"), verdict)}${kvHtml(t("Recommendation"), rec)}${kvHtml(t("Confidence"), conf)}${kv(t("Summary"), review.summary || "—")}</div>${findings ? `<div style="margin-top:10px"><b>${t("Findings")}</b><ul style="margin:6px 0 0 18px;font-size:13px">${findings}</ul></div>` : ""}${questions ? `<div style="margin-top:10px"><b>${t("Open questions for the PM")}</b><ul style="margin:6px 0 0 18px;font-size:13px">${questions}</ul></div>` : ""}${limitations ? `<div style="margin-top:10px"><b>${t("Limitations")}</b><ul style="margin:6px 0 0 18px;font-size:13px">${limitations}</ul></div>` : ""}${meta ? `<p class="subtle" style="margin-top:10px">${esc(meta)}</p>` : ""}`;
+}
+
+const DELIVERY_VIEW = { on_track: ["On track", "green"], at_risk: ["At risk", "orange"], late: ["Late", "red"] };
+const SIGNAL_SEV = { critical: "red", high: "orange", medium: "blue", low: "" };
+
+function pvHealthCard(payload) {
+  const health = (payload || {}).health;
+  if (!health) return `<div class="callout">${t("Plan health is not available for this version.")}</div>`;
+  const s = health.schedule || {};
+  const cap = (payload || {}).confidence_cap || {};
+  const dv = DELIVERY_VIEW[health.delivery_signal] || [health.delivery_signal || "—", ""];
+  const overloaded = (health.workload || []).filter(w => w.is_overloaded).length;
+  const chips = `<div class="pf-chips">${pfChip(dv[0], t("Delivery signal"), dv[1])}${s.days_late != null && s.days_late > 0 ? pfChip("+" + s.days_late + "d", t("Days late"), "bad") : s.days_early != null ? pfChip("-" + s.days_early + "d", t("Days early"), "ok") : ""}${pfChip(String(s.working_days || 0), t("working days"), "")}${pfChip(String(s.tasks || 0), t("Tasks"), "")}${pfChip(String(s.critical_tasks || 0) + " / " + Math.round((s.critical_share || 0) * 100) + "%", t("Critical tasks"), "")}${pfChip(String(s.zero_float_tasks || 0), t("Zero-float tasks"), (s.zero_float_tasks || 0) ? "warn" : "")}${pfChip(String(overloaded), t("Overloaded members"), overloaded ? "bad" : "ok")}${pfChip(String(s.total_estimate_hours || 0) + " h", t("Total estimate"), "")}</div>`;
+  const attention = (health.attention || []).map(a => `<li><span class="badge ${SIGNAL_SEV[a.severity] || ""}">${esc(t(a.severity))}</span> ${esc(a.detail)}</li>`).join("");
+  const capLine = cap.level ? `<p class="subtle" style="margin-top:8px">${t("Evidence cap")}: <span class="badge">${esc(t(cap.level))}</span> ${t("The review's confidence cannot exceed this level with the data available.")}</p>` : "";
+  const capReasons = (cap.reasons || []).length ? `<ul style="margin:4px 0 0 18px;font-size:12px" class="subtle">${cap.reasons.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : "";
+  return `${chips}${capLine}${capReasons}${attention ? `<div style="margin-top:10px"><b>${t("Attention points")}</b><ul style="margin:6px 0 0 18px;font-size:13px">${attention}</ul></div>` : `<p class="subtle" style="margin-top:10px">${t("No attention points: the deterministic checks found nothing to flag.")}</p>`}`;
 }
 
 function pvRiskRow(r) {
@@ -1654,7 +1770,45 @@ function planReviewView() {
       : t("Ask Agent 4 to review the current draft again; it replaces the stored review.");
   const jobLine = job ? `<div class="callout${job.status === "failed" ? " warning" : ""}">${t("Agent job")} #${esc(job.id)} (${esc(job.type)}): <b>${esc(job.status)}</b> (${esc(job.progress)}%)${job.error ? "<br>" + esc(job.error) : ""}</div>` : "";
   const steps = `<div class="callout" style="margin-top:10px"><b>${t("How it works")}</b><br>${t("1. Run Agent 3: it schedules the approved tasks and saves a draft version. 2. Agent 4 reviews that draft automatically and stores its risks. 3. Open the gate, then approve or reject the plan.")}</div>`;
-  const head = `<div class="page-head"><div><div class="eyebrow">M6-B · Agent 4</div><h1>${t("Plan review")}</h1><p>${t("One versioned snapshot of the whole plan. Agent 4 stores risks and findings; the PM approves or rejects the plan as a unit through the gate.")}</p>${steps}</div><div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end"><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-secondary btn-small" data-action="plan-refresh">${t("Refresh")}</button><button class="btn btn-secondary btn-small" data-action="plan-generate"${running || !openable ? " disabled" : ""} title="${esc(genHint)}">${t(versions.length ? "Run Agent 3 again" : "Run Agent 3")}</button><button class="btn btn-primary btn-small" data-action="plan-review"${running || !canReview ? " disabled" : ""} title="${esc(reviewHint)}">${running ? t("Working...") : t("Review with Agent 4")}</button></div><p class="subtle" style="max-width:320px;text-align:end;margin:0">${esc(reviewHint)}</p></div></div>`;
+  const snap0 = (d && d.snapshot) || {};
+  const reviewed = !!snap0.review;
+  const gateState0 = gate ? gate.state : "not_started";
+  // The line under the actions explains the PRIMARY button, so the screen tells one story.
+  const nextHint = running
+    ? t("Agent 4 is reviewing this draft now…")
+    : !versions.length
+      ? genHint
+      : !d
+        ? t("Reload the version details to continue.")
+        : d.status !== "draft"
+          ? t("Only a draft can be reviewed. This version is") + " " + t(PV_LABEL[d.status] || d.status) + "."
+          : !reviewed
+            ? t("Agent 4 has not reviewed this draft yet. Run the review before opening the gate.")
+            : gateState0 === "waiting_for_pm"
+              ? t("The gate is open: approve to write the dates, or reject to archive the draft.")
+              : t("Reviewed. Open the approval gate when you are ready to decide.");
+  // One primary button = the PM's next step in the flow; everything else is a light tool below it.
+  const primary = running
+    ? `<button class="btn btn-primary btn-small" disabled>${t("Working...")}</button>`
+    : !versions.length
+      ? `<button class="btn btn-primary btn-small" data-action="plan-generate"${openable ? "" : " disabled"} title="${esc(genHint)}">${t("Run Agent 3")}</button>`
+      : !d
+        ? `<button class="btn btn-primary btn-small" data-action="plan-refresh">${t("Refresh")}</button>`
+        : d.status !== "draft"
+          ? (openable
+            ? `<button class="btn btn-primary btn-small" data-action="plan-generate" title="${esc(genHint)}">${t("Run Agent 3 again")}</button>`
+            : `<button class="btn btn-primary btn-small" disabled>${t("Review with Agent 4")}</button>`)
+          : !reviewed
+            ? `<button class="btn btn-primary btn-small" data-action="plan-review" title="${esc(reviewHint)}">${t("Review with Agent 4")}</button>`
+            : gateState0 === "waiting_for_pm"
+              ? `<button class="btn btn-primary btn-small" data-action="plan-approve">${t("Approve plan")}</button>`
+              : `<button class="btn btn-primary btn-small" data-action="plan-open-gate"${openable ? "" : " disabled"}>${t("Open approval gate")}</button>`;
+  const tools = `<details class="head-menu"><summary class="btn btn-quiet btn-small" title="${esc(t("More actions"))}">⋯ ${t("More")}</summary><div>${[
+    canReview && reviewed ? `<button class="btn btn-quiet btn-small" data-action="plan-review" title="${esc(reviewHint)}">${t("Review with Agent 4 again")}</button>` : "",
+    versions.length && openable && d && d.status === "draft" ? `<button class="btn btn-quiet btn-small" data-action="plan-generate" title="${esc(genHint)}">${t("Re-run Agent 3")}</button>` : "",
+    `<button class="btn btn-quiet btn-small" data-action="plan-refresh">${t("Refresh")}</button>`,
+  ].filter(Boolean).join("")}</div></details>`;
+  const head = `<div class="page-head"><div><div class="eyebrow">M6-B · Agent 4</div><h1>${t("Plan review")}</h1><p>${t("One versioned snapshot of the whole plan. Agent 4 stores risks and findings; the PM approves or rejects the plan as a unit through the gate.")}</p>${steps}</div><div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-end">${primary}<button class="btn btn-secondary btn-small" data-action="plan-rules-review"${running || !canReview ? " disabled" : ""} title="${esc(t("Runs only the deterministic checks (no LLM): instant, free, and always available when the model is rate-limited."))}">${t("Automatic checks only")}</button>${tools}</div><p class="subtle" style="max-width:320px;text-align:end;margin:0">${esc(nextHint)}</p></div></div>`;
   if (!versions.length) return `${head}${jobLine}<section class="card"><div class="card-body"><div class="empty"><div class="empty-icon">◈</div><h3>${t("No plan versions yet")}</h3><p>${t("Approve the work plan tasks, then run Agent 3 — each run persists a draft version that Agent 4 reviews.")}</p></div></div></section>`;
 
   const versionChips = versions.map(v => `<button class="btn ${state.planVersionSel === v.version ? "btn-primary" : "btn-secondary"} btn-small" data-action="plan-version" data-v="${v.version}">v${esc(v.version)} · ${t(PV_LABEL[v.status] || v.status)}</button>`).join(" ");
@@ -1679,6 +1833,7 @@ function planReviewView() {
 
   const warningsHtml = warnings.length ? `<div class="callout warning"><b>${t("Warnings to acknowledge")}</b><br>${warnings.map(esc).join("<br>")}</div>` : `<div class="callout">${t("No warnings: the conflicts, verdict and critical risks do not block this approval.")}</div>`;
   const reviewHtml = pvReviewCard(snap);
+  const healthHtml = pvHealthCard(state.planHealth);
   const taskRows = tasks.map(x => `<div class="project-row"><div style="flex:1;min-width:0"><div class="project-title">${esc(x.title)} ${x.is_critical ? `<span class="badge" style="background:#fff4e5;color:#9a5b00">${t("Critical")}</span>` : ""}</div><div class="row-meta"><span class="badge">${esc(fmtDate(x.start))} → ${esc(fmtDate(x.end))}</span><span class="badge">${esc(x.duration_days)} ${t("working days")}</span><span class="badge">${esc(x.assignee_member_id ? (memberName(x.assignee_member_id) || "#" + x.assignee_member_id) : t("Unassigned"))}</span>${x.total_float > 0 ? `<span class="subtle">${t("Float")}: ${esc(x.total_float)}</span>` : ""}</div></div></div>`).join("");
 
   const approvedNote = d.approved_at ? `<p class="subtle" style="margin-top:8px">${t("Approved")} ${esc(fmtDateTime(d.approved_at))}</p>` : "";
@@ -1692,8 +1847,9 @@ function planReviewView() {
     <div class="keyvals">${kv(t("Project start"), fmtDate(sched.project_start))}${kv(t("Project end"), fmtDate(sched.project_end))}${kv(t("Duration"), (sched.total_duration_days || 0) + " " + t("working days"))}${kv(t("Tasks"), String(tasks.length))}${kv(t("Critical path"), String((sched.critical_path || []).length) + " " + t("tasks"))}${kv(t("Resource conflicts"), String(conflicts.length))}${kv(t("Open risks"), String(risks.filter(r => r.status === "draft" || r.status === "open").length))}</div>
     ${approvedNote}${gateActions}
   </section>
-  <section class="card section-card"><h2>${t("Agent 4 review")}</h2><p class="section-intro">${t("LangGraph review over the snapshot: rules may raise a concern but can never lower the agent's verdict.")}</p>${reviewHtml}</section>
+  <section class="card section-card"><h2>${t("Agent 4 review")}</h2><p class="section-intro">${t("Agent 4 reads a deterministic brief, records evidence-backed risks and recommends a verdict. The automatic checks and the saved risks can raise that verdict, never lower it — and the recommendation is advice: you decide.")}</p>${reviewHtml}</section>
 </div>
+<section class="card section-card"><h2>${t("Plan health")}</h2><p class="section-intro">${t("Computed by code from this exact snapshot — no LLM, no cost.")}</p>${healthHtml}</section>
 <section class="card section-card"><h2>${t("Approval warnings")}</h2><p class="section-intro">${t("Shown before approval; the PM must acknowledge them explicitly.")}</p>${warningsHtml}</section>
 ${vsApproved}
 <section class="card section-card"><h2>${t("Changes vs the previous version")}</h2><p class="section-intro">${t("Deterministic diff of the two snapshots.")}</p>${pvDiffTable(d.diff_from_prev)}</section>
@@ -1725,7 +1881,13 @@ Object.assign(actions, {
   "plan-review": async () => {
     try {
       const job = await post(`/projects/${state.project.id}/plan/review`, {});
-      state.planReviewJob = job; render(); pollPlanReviewJob(job.id);
+      state.planReviewJob = job; state.planRulesOnly = false; render(); pollPlanReviewJob(job.id);
+    } catch (e) { state.notice = { type: "bad", text: e.message }; render(); }
+  },
+  "plan-rules-review": async () => {
+    try {
+      const job = await post(`/projects/${state.project.id}/plan/review`, { rules_only: true });
+      state.planReviewJob = job; state.planRulesOnly = true; render(); pollPlanReviewJob(job.id);
     } catch (e) { state.notice = { type: "bad", text: e.message }; render(); }
   },
   "plan-open-gate": async () => {

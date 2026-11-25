@@ -1,33 +1,16 @@
 {
   "model": "openai/gpt-oss-120b",
-  "prompt_version": "agent4_v1",
+  "prompt_version": "agent4_v2",
   "rows": [
     {
       "scenario": "double_booked",
-      "tool_correctness": 0.8571428571428571,
-      "success": true,
-      "tools_called": [
-        "get_agent3_results",
-        "get_project_brief",
-        "get_tasks_and_dependencies",
-        "get_team_capacity",
-        "save_draft_risks",
-        "save_plan_review"
-      ],
-      "reads_return_expected_data": true,
-      "risk_saves_accepted": 1,
-      "verdict": "needs_attention",
-      "review_source": "agent4",
-      "stopped": null,
-      "tokens": 17344
-    },
-    {
-      "scenario": "deadline_blown",
       "tool_correctness": 1.0,
       "success": true,
       "tools_called": [
         "get_agent3_results",
         "get_open_risks",
+        "get_plan_diff",
+        "get_plan_health",
         "get_project_brief",
         "get_tasks_and_dependencies",
         "get_team_capacity",
@@ -37,9 +20,67 @@
       "reads_return_expected_data": true,
       "risk_saves_accepted": 1,
       "verdict": "needs_attention",
+      "risk_titles": [],
+      "review": {
+        "findings": [
+          "Ahmed (member_id 101) assigned 64h vs 48h available \u2192 overload (utilization 1.33).",
+          "Critical path concentration: 3 of 4 tasks critical (75%) with zero float.",
+          "Resource conflict: overallocation for Ahmed on 2026-11-17\u20112026-11-19 (conflict key 101|overallocation|2026-11-17|12,13).",
+          "Schedule ends 2026-11-22, 9 days early, yet delivery_signal is at_risk due to resource issues.",
+          "Single point of failure: Ahmed owns two of three critical tasks."
+        ],
+        "confidence": "high",
+        "recommendation": "approve_with_changes",
+        "open_questions": [
+          "Can another team member be assigned to task 13 or 12 to relieve Ahmed?",
+          "Is it acceptable to extend the project end date to add buffer for the critical path?",
+          "Are there any hidden dependencies not captured that could affect the critical chain?",
+          "Can any task estimates be reduced or split to fit Ahmed's capacity?",
+          "Is additional external support (e.g., contractor) available for the booking API work?"
+        ]
+      },
       "review_source": "agent4",
       "stopped": null,
-      "tokens": 21004
+      "tokens": 37456
+    },
+    {
+      "scenario": "deadline_blown",
+      "tool_correctness": 0.875,
+      "success": true,
+      "tools_called": [
+        "get_agent3_results",
+        "get_open_risks",
+        "get_plan_health",
+        "get_project_brief",
+        "get_tasks_and_dependencies",
+        "get_team_capacity",
+        "save_plan_review"
+      ],
+      "reads_return_expected_data": true,
+      "risk_saves_accepted": 0,
+      "verdict": "needs_attention",
+      "risk_titles": [],
+      "review": {
+        "findings": [
+          "Schedule ends 2026-11-22, 4 days after target end 2026-11-18 (task 14).",
+          "Ahmed (member 101) assigned 64\u202fh vs 48\u202fh available, utilization 133% (member 101).",
+          "Critical path includes 3 of 4 tasks (11,12,14) leaving no slack for slips (tasks 11,12,14).",
+          "Resource conflict: Ahmed over\u2011allocated 16\u202fh/day from 2026-11-17 to 2026-11-19 (conflict key \"101|overallocation|2026-11-17|12,13\").",
+          "Test task 14 has zero float; any delay in tasks 12 or 13 pushes final delivery (task 14)."
+        ],
+        "confidence": "high",
+        "recommendation": "approve_with_changes",
+        "open_questions": [
+          "Can additional capacity be added (e.g., reassign UI work to Sara or another member)?",
+          "Is extending the target end date to 2026-11-22 acceptable to the stakeholder?",
+          "Are there any backup resources for the critical path tasks if Ahmed becomes unavailable?",
+          "Can any non\u2011critical tasks be deferred to free Ahmed\u2019s bandwidth?",
+          "Is there flexibility to compress the booking API implementation without compromising quality?"
+        ]
+      },
+      "review_source": "agent4",
+      "stopped": null,
+      "tokens": 29045
     },
     {
       "scenario": "clean_plan",
@@ -48,6 +89,7 @@
       "tools_called": [
         "get_agent3_results",
         "get_open_risks",
+        "get_plan_health",
         "get_project_brief",
         "get_tasks_and_dependencies",
         "get_team_capacity",
@@ -57,9 +99,30 @@
       "reads_return_expected_data": true,
       "risk_saves_accepted": 1,
       "verdict": "needs_attention",
+      "risk_titles": [
+        "Sara overloaded on UI build"
+      ],
+      "review": {
+        "findings": [
+          "Sara assigned 32h (tasks 13,14) yet workload shows only 8h assigned, indicating hidden overload (task 13, member 102).",
+          "Plan finishes 9 days before target end, suggesting estimates may be optimistic (plan health days_early 9).",
+          "Critical path reported only task 11, while tasks 12 and 14 have zero float and could become bottlenecks.",
+          "All tasks have owners and estimates; no unassigned tasks.",
+          "No resource conflicts reported, but workload mismatch points to calculation error."
+        ],
+        "confidence": "medium",
+        "recommendation": "approve_with_changes",
+        "open_questions": [
+          "Can Sara\u2019s workload be redistributed or extended to avoid overload?",
+          "Is the 9\u2011day early finish realistic given the effort estimates?",
+          "Should the critical path be updated to include tasks 12 and 14?",
+          "Are there additional team members available to assist with UI build?",
+          "Do any hidden dependencies exist that were not captured in the task list?"
+        ]
+      },
       "review_source": "agent4",
       "stopped": null,
-      "tokens": 21862
+      "tokens": 31872
     }
   ]
 }

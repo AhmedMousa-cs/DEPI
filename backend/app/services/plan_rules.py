@@ -8,7 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
-from app.schemas.plan import SEVERITY_ORDER, EvidenceRef, RiskDraft
+from app.schemas.plan import RECOMMENDATION_FOR_VERDICT, SEVERITY_ORDER, EvidenceRef, RiskDraft
+from app.services.plan_health import cap_confidence, confidence_cap, plan_health
 
 MAX_EVIDENCE = 8
 
@@ -147,6 +148,20 @@ def verdict_floor(findings: list[RuleFinding], snapshot: dict) -> str:
     return "ready"
 
 
+def risk_verdict_floor(risks) -> str | None:
+    """Consistency floor from the risks already stored for the draft (agent or rules).
+
+    A reviewer who records a critical risk cannot then call the plan ready; the PM would have to
+    decide which half of the review to believe. ``None`` = the register allows any verdict.
+    """
+    worst = max((SEVERITY_ORDER.get(str(r.get("severity")), -1) for r in risks), default=-1)
+    if worst >= SEVERITY_ORDER["critical"]:
+        return "blocked"
+    if worst >= SEVERITY_ORDER["high"]:
+        return "needs_attention"
+    return None
+
+
 VERDICT_ORDER = {"ready": 0, "needs_attention": 1, "blocked": 2}
 
 
@@ -157,4 +172,8 @@ def rules_review(findings: list[RuleFinding], snapshot: dict) -> dict:
         f"Automatic checks found {len(findings)} issue(s); verdict: {floor}."
         if findings else "Automatic checks found no issues."
     )
-    return {"verdict": floor, "summary": summary, "findings": top}
+    cap = confidence_cap(plan_health(snapshot))
+    confidence, notes = cap_confidence("medium" if findings else "high", cap)
+    return {"verdict": floor, "summary": summary, "findings": top,
+            "confidence": confidence, "limitations": notes,
+            "recommendation": RECOMMENDATION_FOR_VERDICT[floor], "open_questions": []}

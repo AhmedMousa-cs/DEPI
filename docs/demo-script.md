@@ -1,6 +1,6 @@
 # NEXUS demo script
 
-**Full flow, M2 → M6-B, ~12 minutes.** Every label below matches the UI exactly.
+**Full flow, M2 → M6-B, ~13 minutes.** Every label below matches the UI exactly.
 
 ---
 
@@ -103,8 +103,8 @@ then review again. Two minutes, before the audience.
 1. **Schedule** tab → **Run Agent 3**.
 2. Show the **critical path** chain, **conflicts** and **capacity** (overloaded members).
 3. Show the **explanation** (LLM prose) next to the numbers (code).
-4. Do **not** approve here yet. The plan gate in Act 7 approves the whole plan as one versioned
-   decision and writes these same dates.
+4. The Schedule tab is **preview-only**: there is no approve button. The decision happens in
+   Plan review (Act 7), which writes these same dates as one versioned approval.
 
 > "The dates come from CPM in Python. The model only writes the explanation — it cannot move a date."
 
@@ -121,8 +121,9 @@ then review again. Two minutes, before the audience.
    - **Plan health** card: delivery signal, days late/early, zero-float tasks, overloaded members,
      attention points, and the **evidence cap** on confidence.
    - Verdict / recommendation / confidence badges and the limitations list.
-5. **Open approval gate** → gate becomes `waiting_for_pm`.
-6. **Approve plan** → acknowledge warnings → *"Plan v1 approved — N task date(s) written."*
+5. The review opens the gate automatically — the badge reads **Waiting for your decision**.
+6. **Approve plan** → acknowledge the current warnings → *"Plan vN approved — N task date(s) written."*
+   This is the **only** place dates are written; the legacy Schedule decision returns `410 Gone`.
 
 > "The model cannot approve. Confidence is capped by evidence: no target date or unassigned work
 > means it is not allowed to say 'high'. A blocked verdict cannot recommend approval."
@@ -143,13 +144,23 @@ Fallback: **Automatic checks only** — same panel, `source=rules`, zero tokens.
 
 ---
 
-## Act 9 · Change management (1 min)
+## Act 9 · Change management (2 min)
 
-1. **Work plan** tab → **Change...** on an approved task.
-2. Change the end date; write a reason.
+1. **Work plan** tab → **Change…** on an approved task.
+2. Change the **end date**; write a reason → **Propose with impact analysis**.
 3. **Changes** tab shows the diff, the **deterministic impact** (critical delay, dependent tasks,
-   capacity) and severity.
-4. **Approve & apply** → the task is updated; the audit log keeps before/after.
+   capacity) and severity. Nothing is applied yet.
+4. **Accept proposal** → this stages a **draft plan version**. The published plan stays live and the
+   card moves to **Awaiting plan approval**.
+5. **Review plan** → Plan review opens on that version → **Review with Agent 4** (or
+   **Automatic checks only**). Saving the review opens the gate.
+6. **Approve plan** → acknowledge the warnings → *"Change published. The task edits and schedule
+   are live."*
+7. Back to **Changes**: the card is **Published** and links to its version. Work plan and the
+   Schedule Gantt show the new end date; the audit log keeps before/after.
+
+> "Accepting the proposal changes nothing yet. The same gate that approves a plan publishes the
+> change — one decision, one version."
 
 ---
 
@@ -199,7 +210,11 @@ honest.
 | Login says *"Cannot reach the server"* | Docker Desktop stopped | `docker compose up -d db api worker` |
 | Job stuck at `queued` | worker not running | `docker compose up -d worker` |
 | Job `failed` with 429 | provider rate limit | **Automatic checks only** |
-| Approve returns `inputs_changed` | tasks edited after the review | `⋯ More` → **Re-run Agent 3** → review again |
+| Approve returns `inputs_changed` | tasks, dates or team changed after the review | normal draft: `⋯ More` → **Re-run Agent 3** → review again; change draft: **Reject plan** → propose the change again |
+| Approve returns `warnings_changed` (409) | the warnings were refreshed since you read them | reopen the gate, read the new warnings, acknowledge again |
+| **Accept proposal** returns `change_plan_pending` (409) | another change draft is already waiting | open Plan review and approve/reject that draft first |
+| **Accept proposal** returns `change_inputs_changed` (409) | the task was edited since you proposed | propose the change again from Work plan |
+| **Accept proposal** returns `change_schedule_infeasible` (422) | the requested dates clash with dependencies or the working calendar | move the dates; the proposal stays pending |
 | UI shows old behaviour | cached JS/CSS | reload with `Ctrl+F5` (files are cache-busted by version) |
 | Old data in the way | previous demo runs | create a fresh project; or `docker compose exec api python -m app.seed` |
 

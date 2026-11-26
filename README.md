@@ -31,10 +31,10 @@ NEXUS splits the job:
 | 1 | **Sources** | — | Brief + transcripts stored as text (`.txt`, `.md`, `.docx`, `.pdf`, ≤ 5 MB) | — |
 | 2 | **Scope review** | Agent 1 | Requirements grouped by module, with priorities and open questions | PM approves the scope |
 | 3 | **Work plan** | Agent 2 | Stories → tasks with estimates, dependencies and assignments | PM decides every draft item |
-| 4 | **Schedule** | Agent 3 | CPM dates, critical path, resource conflicts, a versioned plan snapshot | PM approves → dates written to tasks |
-| 5 | **Plan review** | Agent 4 | Verdict, risks, findings, confidence, recommendation | PM opens the approval gate |
+| 4 | **Schedule** | Agent 3 | CPM dates, critical path, resource conflicts, a versioned plan snapshot | Preview only — the decision happens in Plan review |
+| 5 | **Plan review** | Agent 4 | Verdict, risks, findings, confidence, recommendation | PM approves or rejects — the only decision point |
 | 6 | **Delivery** | — | Gantt + per-task progress (`todo → in progress → done`) | PM records execution |
-| 7 | **Changes** | — | Field-level diff, deterministic impact, approve & apply | PM decides |
+| 7 | **Changes** | — | Field-level diff, deterministic impact, a staged draft plan | PM accepts a proposal → approves the draft in Plan review |
 | 8 | **Portfolio** | — | Cross-project health, resources, risks, assistant chat | PM only |
 | 9 | **Report** | — | PDF status report with Gantt, risks and Arabic shaping | PM only |
 
@@ -143,9 +143,19 @@ draft ──review──► draft + review ──open gate──► waiting_for_
 ```
 
 - A **draft** is a full snapshot (tasks, dates, critical path, conflicts, risks).
+- The **Schedule** tab is preview-only: Agent 3's draft next to the published Gantt. The legacy
+  `POST /projects/{id}/scheduling/{draft_id}/decision` returns `410 Gone`; every decision happens here.
+- A **task change** takes the same road: accepting a proposal in Changes stages a draft version
+  (the published plan stays live). Approving that draft publishes the edited fields, the recalculated
+  dates and the risks in one transaction; rejecting it keeps the current plan. One change draft can
+  be open at a time.
+- A requested start or end date is an **exact working-day constraint** and stays pinned in later
+  Agent 3 runs until the PM changes it again.
 - Approving writes the snapshot dates to the tasks and moves the project to `active`.
 - Rejecting archives the draft and its risks; nothing is written to tasks.
-- Editing tasks after a review marks the inputs as changed, so a stale approval cannot slip through.
+- Approval re-checks the planning inputs inside the transaction (project dates, approved tasks,
+  dependencies, capacity and availability). If the warnings shown to the PM have changed, the API
+  returns `409 warnings_changed` and the screen refreshes them before the acknowledgement.
 - `GET /projects/{id}/plan/versions/{v}/health` is deterministic and PM-only: it explains *why*
   a plan is at risk without spending a single token.
 
@@ -230,8 +240,6 @@ Honest list, so nobody is surprised in a demo:
 - **`Updates (next)` and `Decisions (next)` tabs are disabled placeholders.** The next blueprint
   phase (event feed with notifications, automatic invalidation of stale drafts, and a
   portfolio-level supervisor) is not built yet.
-- **Two approval paths for a schedule**: the Schedule tab's *Approve & write dates* and the Plan
-  review gate. Both are tested and write the same fields, but they are separate code paths.
 - **Progress updates use polling**, not push (no WebSocket/SSE).
 - **The live Agent 4 eval needs a paid LLM tier** (~40k tokens per review). The
   *Automatic checks only* button runs the same deterministic checks with no model call, so a

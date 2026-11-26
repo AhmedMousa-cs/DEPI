@@ -125,6 +125,7 @@ class PlanVersionDetail(PlanVersionSummary):
     diff_from_prev: dict | None
     risks: list[RiskOut] = []
     warnings: list[str] = []
+    warnings_token: str | None = None
     diff_vs_approved: dict | None = None
 
 
@@ -135,6 +136,7 @@ class ApproveBody(BaseModel):
 
     comment: str = Field(default="", max_length=2000)
     acknowledge_warnings: bool = False
+    warnings_token: str | None = Field(default=None, max_length=128)
 
 
 class RejectBody(BaseModel):

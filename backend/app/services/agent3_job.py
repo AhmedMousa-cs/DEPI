@@ -1,11 +1,8 @@
 """Job handler: Agent 3 schedules the project (CPM + optional LLM) and snapshots the plan.
 
-Hybrid flow (integration of the M6.1 schedule-draft flow with the m6-B plan-approval chain):
-the same Agent3Output is persisted as BOTH artifacts —
-  1. a ``schedule_draft`` (M6.1): the Schedule tab approves it and writes the task dates;
-  2. a draft ``plan_version`` (m6-B): feeds the Agent 4 review and the plan approval gate.
-Tasks are never touched by the agent: dates reach the tasks table only through a PM
-approval (services/scheduling.py for drafts, orchestrator/plan_gate.py for plan versions).
+One Agent3Output feeds the Schedule tab preview and the draft plan version for Agent 4.
+The agent leaves task rows untouched. The PM publishes the generated schedule through
+the versioned approval gate in Plan Review.
 """
 from __future__ import annotations
 

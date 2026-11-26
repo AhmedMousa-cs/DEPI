@@ -54,6 +54,7 @@ class PlanDecision(BaseModel):
     comment: str = Field(default="", max_length=2000)
     decided_by: Annotated[int, Field(strict=True, gt=0)]
     acknowledge_warnings: bool = False
+    warnings_token: str | None = Field(default=None, max_length=128)
 
     @model_validator(mode="after")
     def _comment_on_reject(self):
@@ -82,16 +83,19 @@ class PlanGateState(TypedDict, total=False):
     comment: str | None
     decided_by: int | None
     acknowledge_warnings: bool
+    warnings_token: str | None
     result: dict | None
 
 
 class DbPlanWriter:
     """The only business writer behind the gate."""
 
-    def approve(self, *, project_id, version, run_id, decided_by, comment, acknowledge_warnings) -> dict:
+    def approve(self, *, project_id, version, run_id, decided_by, comment, acknowledge_warnings,
+                warnings_token=None) -> dict:
         with SessionLocal() as db:
             out = plan_approval.approve_plan(db, project_id=project_id, version=version, decided_by=decided_by,
-                                             comment=comment, acknowledge_warnings=acknowledge_warnings, run_id=run_id)
+                                             comment=comment, acknowledge_warnings=acknowledge_warnings,
+                                             warnings_token=warnings_token, run_id=run_id)
             db.commit()
             return out
 
@@ -110,7 +114,7 @@ def build_plan_graph(writer) -> StateGraph:
                          "run_id": state["run_id"], "summary": state.get("summary", {})})
         d = parse_plan_decision(raw)
         return {"decision": d.decision, "comment": d.comment or None, "decided_by": d.decided_by,
-                "acknowledge_warnings": d.acknowledge_warnings}
+                "acknowledge_warnings": d.acknowledge_warnings, "warnings_token": d.warnings_token}
 
     def finalize_node(state: PlanGateState) -> dict:
         outcome = state.get("decision")
@@ -118,19 +122,28 @@ def build_plan_graph(writer) -> StateGraph:
                       decided_by=state["decided_by"])
         if outcome == "approved":
             res = writer.approve(**common, comment=state.get("comment") or "",
-                                 acknowledge_warnings=bool(state.get("acknowledge_warnings")))
+                                 acknowledge_warnings=bool(state.get("acknowledge_warnings")),
+                                 warnings_token=state.get("warnings_token"))
         elif outcome == "rejected":
             res = writer.reject(**common, comment=state.get("comment") or "")
         else:
             res = {"written": False}
         return {"result": {"outcome": outcome, **res}}
 
+    def after_finalize(state: PlanGateState) -> str:
+        # Preserve the waiting gate when the transaction detects an input or warning change
+        # after the API precheck. The PM can review again, retry, or reject the draft.
+        result = state.get("result") or {}
+        if result.get("code") in ("inputs_busy", "inputs_changed", "warnings_changed", "warnings_not_acknowledged"):
+            return "await_plan_node"
+        return END
+
     g = StateGraph(PlanGateState)
     g.add_node("await_plan_node", await_plan_node)
     g.add_node("finalize_node", finalize_node)
     g.add_edge(START, "await_plan_node")
     g.add_edge("await_plan_node", "finalize_node")
-    g.add_edge("finalize_node", END)
+    g.add_conditional_edges("finalize_node", after_finalize, ["await_plan_node", END])
     return g
 
 
@@ -183,7 +196,8 @@ class PlanGate:
             db.commit()
         self._graph.invoke(
             {"project_id": project_id, "version": version, "run_id": uuid.uuid4().hex, "summary": summary,
-             "decision": None, "comment": None, "decided_by": None, "acknowledge_warnings": False, "result": None},
+             "decision": None, "comment": None, "decided_by": None, "acknowledge_warnings": False,
+             "warnings_token": None, "result": None},
             self._config(project_id, version))
         return self.status(project_id, version)
 
@@ -194,9 +208,10 @@ class PlanGate:
         return self.status(project_id, version)
 
     def approve(self, project_id: int, version: int, decided_by: int, comment: str = "",
-                acknowledge_warnings: bool = False) -> dict:
+                acknowledge_warnings: bool = False, warnings_token: str | None = None) -> dict:
         return self._resume(project_id, version, {"decision": "approved", "comment": comment or "",
-                                                  "decided_by": decided_by, "acknowledge_warnings": acknowledge_warnings})
+                                                  "decided_by": decided_by, "acknowledge_warnings": acknowledge_warnings,
+                                                  "warnings_token": warnings_token})
 
     def reject(self, project_id: int, version: int, decided_by: int, comment: str) -> dict:
         return self._resume(project_id, version, {"decision": "rejected", "comment": comment, "decided_by": decided_by})

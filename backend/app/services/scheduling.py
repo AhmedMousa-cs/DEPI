@@ -1,15 +1,9 @@
-"""Schedule draft persistence + PM approval (M6.1). Row changes and audit rows share one transaction.
-
-Draft-only rule: the agent writes ONLY schedule_drafts rows. tasks.start / tasks.end are written
-by approve_schedule (a PM decision), never by the agent.
-"""
-from datetime import date, datetime, timezone
+"""Store and retrieve Agent 3 schedule previews and historical drafts."""
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.audit import user_actor, write_audit
-from app.db.models import ScheduleDraft, Task
+from app.db.models import ScheduleDraft
 
 
 def save_schedule_draft(
@@ -56,61 +50,3 @@ def latest_schedule_draft(db: Session, project_id: int) -> ScheduleDraft | None:
         .order_by(ScheduleDraft.id.desc())
         .limit(1)
     )
-
-
-def approve_schedule(
-    db: Session,
-    *,
-    draft: ScheduleDraft,
-    pm_id: int,
-    decision: str,
-    comment: str = "",
-) -> ScheduleDraft:
-    """Apply a PM decision. On approval the dates land on the tasks; PM-locked tasks are skipped."""
-    before_tasks = {
-        str(t.id): {"start": t.start.isoformat() if t.start else None, "end": t.end.isoformat() if t.end else None}
-        for t in db.scalars(select(Task).where(Task.project_id == draft.project_id))
-    }
-
-    if decision == "approved":
-        scheduled = {str(t["id"]): t for t in draft.payload["schedule"]["tasks"]}
-        tasks = db.scalars(select(Task).where(Task.project_id == draft.project_id)).all()
-        written = 0
-        for task in tasks:
-            if task.review_status != "approved":
-                continue  # only tasks the PM approved are part of the plan; drafts/rejected stay undated
-            # note: locked_by_pm is set by ANY PM decision (incl. plain approval) and only stops
-            # agents from overwriting PM-reviewed content on re-runs. Approving the schedule IS
-            # the PM decision that authorizes these dates, so approved tasks are dated.
-            got = scheduled.get(str(task.id))
-            if got is None:
-                continue  # task created after the draft: it simply has no date yet
-            task.start = date.fromisoformat(got["start_date"])
-            task.end = date.fromisoformat(got["end_date"])
-            task.is_critical = bool(got.get("is_critical"))  # the Gantt and the PDF read this flag
-            written += 1
-    else:
-        written = 0
-
-    draft.review_status = decision
-    draft.pm_comment = comment or None
-    draft.reviewed_by = pm_id
-    draft.reviewed_at = datetime.now(timezone.utc)
-    write_audit(
-        db,
-        f"user:{pm_id}",
-        "schedule.approved" if decision == "approved" else "schedule.rejected",
-        "schedule_draft",
-        draft.id,
-        before={"tasks": before_tasks},
-        after={
-            "decision": decision,
-            "comment": comment or None,
-            "tasks_dated": written,
-            "project_start": draft.project_start.isoformat(),
-            "project_end": draft.project_end.isoformat(),
-            "total_duration_days": draft.total_duration_days,
-            "conflicts_count": draft.conflicts_count,
-        },
-    )
-    return draft

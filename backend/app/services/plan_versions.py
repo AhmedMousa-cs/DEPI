@@ -24,6 +24,7 @@ from app.db.models import PlanVersion, Project, Requirement, Risk, Task, TaskDep
 from app.schemas.plan import PlanReviewDraft, RiskDraft
 
 SNAPSHOT_SCHEMA = 1
+INPUTS_FINGERPRINT_VERSION = 2
 TASK_DIFF_FIELDS = (
     ("duration_days", "Duration (working days)"),
     ("start", "Start"),
@@ -54,32 +55,38 @@ class PlanInputs:
     dangling: list[tuple[int, int]] = field(default_factory=list)  # (task, depends_on a non-approved task)
 
 
-def load_plan_inputs(db: Session, project_id: int) -> PlanInputs:
+def load_plan_inputs(db: Session, project_id: int, *, lock: bool = False) -> PlanInputs:
     """The approved data a plan is built from (approved tasks, their dependencies, the team)."""
     project = db.get(Project, project_id)
     if project is None:
         raise PlanVersionError("project not found")
-    tasks = list(
-        db.scalars(
-            select(Task)
-            .where(Task.project_id == project_id, Task.review_status == "approved")
-            .order_by(Task.id)
-        )
-    )
+    member_query = select(TeamMember).where(TeamMember.project_id == project_id).order_by(TeamMember.id)
+    task_query = select(Task).where(Task.project_id == project_id).order_by(Task.id)
+    if lock:
+        # The approval transaction already holds the parent project lock. Lock the team before
+        # tasks (deleting a member can clear task assignments), then lock every project task
+        # so a concurrently approved task cannot enter the scheduling inputs mid-approval.
+        member_query = member_query.with_for_update(read=True, nowait=True).execution_options(populate_existing=True)
+        task_query = task_query.with_for_update(nowait=True).execution_options(populate_existing=True)
+    else:
+        task_query = task_query.where(Task.review_status == "approved")
+    members = list(db.scalars(member_query))
+    tasks = [task for task in db.scalars(task_query) if task.review_status == "approved"]
     ids = {t.id for t in tasks}
     deps: dict[int, list[int]] = {t.id: [] for t in tasks}
     dangling: list[tuple[int, int]] = []
     if ids:
-        for d in db.scalars(select(TaskDependency).where(TaskDependency.task_id.in_(ids))):
+        dependency_query = select(TaskDependency).where(TaskDependency.task_id.in_(ids))
+        if lock:
+            dependency_query = dependency_query.order_by(TaskDependency.task_id, TaskDependency.depends_on_task_id)
+            dependency_query = dependency_query.with_for_update(nowait=True).execution_options(populate_existing=True)
+        for d in db.scalars(dependency_query):
             if d.depends_on_task_id in ids:
                 deps[d.task_id].append(d.depends_on_task_id)
             else:
                 dangling.append((d.task_id, d.depends_on_task_id))
     for v in deps.values():
         v.sort()
-    members = list(
-        db.scalars(select(TeamMember).where(TeamMember.project_id == project_id).order_by(TeamMember.id))
-    )
     return PlanInputs(
         project={
             "id": project.id,
@@ -113,8 +120,8 @@ def load_plan_inputs(db: Session, project_id: int) -> PlanInputs:
     )
 
 
-def inputs_fingerprint(inputs: PlanInputs) -> str:
-    """Hash of everything that determines the schedule. Compared again at approval time."""
+def inputs_fingerprint(inputs: PlanInputs, *, version: int = INPUTS_FINGERPRINT_VERSION) -> str:
+    """Hash the schedule inputs. Version 1 is retained for drafts saved before date checking."""
     payload = {
         "tasks": [[t["id"], t["estimate_hours"], t["assignee_member_id"]] for t in inputs.tasks],
         "deps": sorted([k, sorted(v)] for k, v in inputs.deps.items()),
@@ -123,7 +130,25 @@ def inputs_fingerprint(inputs: PlanInputs) -> str:
             for m in inputs.members
         ],
     }
+    if version == INPUTS_FINGERPRINT_VERSION:
+        payload["project_dates"] = [inputs.project["start_date"], inputs.project["end_date"]]
+        payload["dangling"] = sorted(inputs.dangling)
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def snapshot_matches_inputs(snapshot: dict, inputs: PlanInputs) -> bool:
+    version = snapshot.get("inputs_fingerprint_version", 1)
+    if version == 1:
+        # Legacy snapshots kept the original project dates, and Agent 3 never scheduled a
+        # dangling dependency. Require both before relying on the legacy fingerprint.
+        project = snapshot.get("project") or {}
+        if inputs.dangling or any(
+            key not in project or project[key] != inputs.project[key] for key in ("start_date", "end_date")
+        ):
+            return False
+    elif version != INPUTS_FINGERPRINT_VERSION:
+        return False
+    return inputs_fingerprint(inputs, version=version) == snapshot.get("inputs_fingerprint")
 
 
 # -------------------------------------------------------------------------- snapshot
@@ -191,6 +216,7 @@ def build_snapshot(
         ],
         "explanation": output.explanation.model_dump(mode="json"),
         "overrides": [dict(o) for o in overrides],
+        "inputs_fingerprint_version": INPUTS_FINGERPRINT_VERSION,
         "inputs_fingerprint": inputs_fingerprint(inputs),
         "prompt_version": output.prompt_version,
         "risks": [],
@@ -281,10 +307,11 @@ def diff_snapshots(old: dict | None, new: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------- queries
-def get_version(db: Session, project_id: int, version: int, *, lock: bool = False) -> PlanVersion | None:
+def get_version(db: Session, project_id: int, version: int, *, lock: bool = False,
+                nowait: bool = False) -> PlanVersion | None:
     stmt = select(PlanVersion).where(PlanVersion.project_id == project_id, PlanVersion.version == version)
     if lock:
-        stmt = stmt.with_for_update()
+        stmt = stmt.with_for_update(nowait=nowait).execution_options(populate_existing=True)
     return db.scalar(stmt)
 
 

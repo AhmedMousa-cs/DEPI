@@ -5,9 +5,12 @@ precondition is re-checked inside it, so a stale or concurrent request can't app
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import date, datetime, timezone
 
 from sqlalchemy import select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.audit import write_audit
@@ -31,7 +34,31 @@ def plan_warnings(snapshot: dict) -> list[str]:
     return out
 
 
-def approval_blockers(db: Session, project: Project | None, pv: PlanVersion | None, acknowledge: bool) -> dict | None:
+def approval_warnings(pv: PlanVersion) -> tuple[list[str], str | None]:
+    warnings = plan_warnings(pv.snapshot)
+    if not warnings:
+        return warnings, None
+    # A count or title can stay the same while the underlying conflict or risk changes.
+    # Row identities and review timestamps can change even when the evidence is repeated.
+    snapshot = pv.snapshot
+    evidence = {
+        "project_id": pv.project_id,
+        "version": pv.version,
+        "warnings": warnings,
+        "conflicts": snapshot.get("conflicts", []),
+        "critical_risks": [
+            {key: value for key, value in risk.items() if key not in ("id", "status")}
+            for risk in snapshot.get("risks", []) if risk.get("severity") == "critical"
+        ],
+        "review": {key: value for key, value in (snapshot.get("review") or {}).items()
+                   if key not in ("run_id", "reviewed_at")},
+    }
+    token = hashlib.sha256(json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return warnings, token
+
+
+def approval_blockers(db: Session, project: Project | None, pv: PlanVersion | None, acknowledge: bool,
+                      warnings_token: str | None = None, *, lock_inputs: bool = False) -> dict | None:
     """None = approvable. Otherwise {"code", "message", ...} explaining why not."""
     if project is None:
         return {"code": "project_not_found", "message": "Project not found."}
@@ -48,13 +75,17 @@ def approval_blockers(db: Session, project: Project | None, pv: PlanVersion | No
         return {"code": "superseded", "message": f"Version {latest.version} replaced this draft."}
     if not pv.snapshot.get("review"):
         return {"code": "not_reviewed", "message": "Agent 4 has not reviewed this draft yet."}
-    if pvs.inputs_fingerprint(pvs.load_plan_inputs(db, pv.project_id)) != pv.snapshot.get("inputs_fingerprint"):
+    inputs = pvs.load_plan_inputs(db, pv.project_id, lock=lock_inputs)
+    if not pvs.snapshot_matches_inputs(pv.snapshot, inputs):
         return {"code": "inputs_changed",
-                "message": "Tasks, dependencies or the team changed after this draft was built. Rebuild the plan."}
-    warnings = plan_warnings(pv.snapshot)
+                "message": "The draft no longer matches the project dates, tasks, dependencies or team. Rebuild the plan."}
+    warnings, current_token = approval_warnings(pv)
     if warnings and not acknowledge:
         return {"code": "warnings_not_acknowledged", "message": "Acknowledge the warnings to approve this plan.",
-                "warnings": warnings}
+                "warnings": warnings, "warnings_token": current_token}
+    if warnings_token != current_token:
+        return {"code": "warnings_changed", "message": "Review the current warnings before approving this plan.",
+                "warnings": warnings, "warnings_token": current_token}
     return None
 
 
@@ -64,12 +95,22 @@ def _decision(db: Session, pv: PlanVersion, decision: str, reason: str, user_id:
 
 
 def approve_plan(db: Session, *, project_id: int, version: int, decided_by: int, comment: str,
-                 acknowledge_warnings: bool, run_id: str | None = None) -> dict:
+                 acknowledge_warnings: bool, warnings_token: str | None = None, run_id: str | None = None) -> dict:
     """Apply an approval decided by the PM. Returns {"written": bool, ...reason...}. Caller commits."""
     actor = f"user:{decided_by}"
-    project = db.scalar(select(Project).where(Project.id == project_id).with_for_update())
-    pv = pvs.get_version(db, project_id, version, lock=True)
-    blocker = approval_blockers(db, project, pv, acknowledge_warnings)
+    project = db.scalar(select(Project).where(Project.id == project_id).with_for_update()
+                        .execution_options(populate_existing=True))
+    pv = None
+    # Review and task writers can hold child locks before referencing the project. Fail
+    # quickly if a lock is held and release any partial child locks through the savepoint.
+    try:
+        with db.begin_nested():
+            pv = pvs.get_version(db, project_id, version, lock=True, nowait=True)
+            blocker = approval_blockers(db, project, pv, acknowledge_warnings, warnings_token, lock_inputs=True)
+    except OperationalError as exc:
+        if getattr(exc.orig, "sqlstate", None) != "55P03":  # PostgreSQL lock_not_available
+            raise
+        blocker = {"code": "inputs_busy", "message": "Plan inputs are being updated. Try approving again."}
     if blocker is not None:
         write_audit(db, actor, "plan.approval_blocked", "plan_version", pv.id if pv else None,
                     after={**blocker, "project_id": project_id, "version": version, "run_id": run_id})
@@ -102,7 +143,7 @@ def approve_plan(db: Session, *, project_id: int, version: int, decided_by: int,
                 before={"status": "draft", "project_status": PLAN_STATUS_FOR_REVIEW},
                 after={"status": "approved", "project_status": "active", "version": version, "tasks_applied": applied,
                        "acknowledged_warnings": warnings if acknowledge_warnings else [], "comment": comment,
-                       "superseded_versions": older, "run_id": run_id})
+                       "warnings_token": warnings_token, "superseded_versions": older, "run_id": run_id})
     return {"written": True, "tasks_applied": applied}
 
 

@@ -74,7 +74,8 @@ def get_version(project_id: int, version: int, db: Session = Depends(get_db), us
         vs_approved = {"against_version": approved.version, **pvs.diff_snapshots(approved.snapshot, pv.snapshot)}
     detail = PlanVersionDetail.model_validate(pv)
     detail.risks = [RiskOut.model_validate(r) for r in pvs.risks_of(db, pv.id, include_dismissed=True)]
-    detail.warnings = plan_approval.plan_warnings(pv.snapshot) if pv.status == "draft" else []
+    if pv.status == "draft":
+        detail.warnings, detail.warnings_token = plan_approval.approval_warnings(pv)
     detail.diff_vs_approved = vs_approved
     return detail
 
@@ -153,11 +154,11 @@ def open_gate(project_id: int, version: int, db: Session = Depends(get_db), user
         raise HTTPException(409, str(exc))
 
 
-def _precheck(db: Session, project_id: int, version: int, acknowledge: bool) -> None:
+def _precheck(db: Session, project_id: int, version: int, body: ApproveBody) -> None:
     """Refuse BEFORE the gate is resumed, so a refusal doesn't consume the waiting interrupt."""
     project = db.get(Project, project_id)
     pv = pvs.get_version(db, project_id, version)
-    blocker = plan_approval.approval_blockers(db, project, pv, acknowledge)
+    blocker = plan_approval.approval_blockers(db, project, pv, body.acknowledge_warnings, body.warnings_token)
     if blocker is not None:
         raise HTTPException(409, blocker)
 
@@ -169,17 +170,21 @@ def approve(project_id: int, version: int, body: ApproveBody | None = None, db: 
     get_project_or_404(db, project_id)
     _version_or_404(db, project_id, version)
     body = body or ApproveBody()
-    _precheck(db, project_id, version, body.acknowledge_warnings)
+    _precheck(db, project_id, version, body)
     db.close()
     try:
         with postgres_checkpointer() as saver:
-            state = PlanGate(saver).approve(project_id, version, user.id, body.comment, body.acknowledge_warnings)
+            state = PlanGate(saver).approve(project_id, version, user.id, body.comment, body.acknowledge_warnings,
+                                            body.warnings_token)
     except PlanGateNotWaiting:
         raise HTTPException(409, "The approval gate is not open for this version. Open it first.")
     result = state.get("result") or {}
     if not result.get("written"):
-        raise HTTPException(409, {"message": result.get("message", "Approval was refused."),
-                                  "code": result.get("code"), "hint": "Re-open the gate and try again."})
+        detail = {k: v for k, v in result.items() if k not in ("written", "outcome")}
+        detail.setdefault("message", "Approval was refused.")
+        if state["state"] != "waiting_for_pm":
+            detail["hint"] = "Re-open the gate and try again."
+        raise HTTPException(409, detail)
     return {"project_id": project_id, "version": version, "status": "approved", **{k: v for k, v in result.items()
                                                                                      if k != "written"}}
 

@@ -197,7 +197,7 @@ OCR; meeting recording/transcription; automatic external messages; one independe
   - **Plan review screen (M6 screens item):** a PM-only tab that shows the version stack, the snapshot KPIs, Agent 4's verdict/findings, the approval warnings, both diffs (vs previous, vs approved), the per-version risks and the planned tasks; the gate moves open → waiting → approve/reject in the same screen with an explicit acknowledgement when warnings exist.
   - **Evidence:** Golden Project C (`evals/golden/project-c-*`) pins a 15-day CPM, one intended overallocation and the exact rule set/verdict floor in 4 deterministic tests; the live DeepEval tool-correctness run passes 3/3 on Groq (`evals/results/agent4_tool_correctness.json`).
   - **Loop budget:** a real review reports 8-12k tokens and each turn costs several graph steps, so the summary trigger is 60000 (12 kept messages) and the graph limit is 120; the old 3500/40 pair compacted the context mid-review and restarted it. All three are env-overridable (`AGENT4_SUMMARY_TRIGGER_TOKENS`, `AGENT4_SUMMARY_KEEP_MESSAGES`, `AGENT4_MAX_GRAPH_STEPS`).
-- **Consequence:** the plan is reviewed and decided as a whole before execution, risks are stored and auditable, and the existing Schedule tab approval keeps working. Known integration debt: two approval paths can write dates; they should be unified in a later milestone.
+- **Consequence:** the plan is reviewed and decided as a whole before execution, and risks are stored and auditable. The separate Schedule tab approval was retired in ADR-025.
 
 ### ADR-022: Agent 4 professional edition - deterministic review brief, advisory recommendation, risk-consistent verdict
 - **Status:** Approved
@@ -226,6 +226,10 @@ OCR; meeting recording/transcription; automatic external messages; one independe
   - **"Automatic checks only" button:** posts `POST /plan/review` with `{rules_only: true}`, which the existing worker path already supports: instant, free and always available when the model is rate-limited. The review is saved with `source=rules` and the same capping/consistency rules.
   - **Prompt v3** (`agent4_review_v3.md`): states the confidence-evidence rule and the blocked⇒revise rule; v1/v2 stay for history.
 - **Consequence:** a review can no longer overstate its evidence or contradict its own verdict, the PM can see and verify the numbers behind a verdict without paying for a model call, and a rate-limited demo still produces a real stored review. No migration: all new fields live in the plan snapshot JSON.
+
+### ADR-025: Generated schedules are published through Plan Review
+
+The Schedule tab presents Agent 3's preview alongside the live Gantt. The legacy decision endpoint returns `410 Gone` for PMs. Existing schedule previews, historical decisions, and published task dates are retained. Version approval checks current planning inputs again and requires acknowledgement of the warnings shown to the PM. Versioning for later manual task changes is tracked separately in PR 1B.
 
 ## Decision Log
 

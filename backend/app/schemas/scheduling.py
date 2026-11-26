@@ -163,7 +163,7 @@ class TeamCapacityReport(_Base):
     unknown_assignees: tuple[str, ...] = ()
 
 
-# ----------------------------------------------------------- PM review API (M6.1)
+# ----------------------------------------------------------- PM schedule preview API
 class ScheduleDraftOut(BaseModel):
     """One Agent 3 draft, as stored by the job handler. Payload is the full Agent3Output dump."""
 
@@ -183,18 +183,3 @@ class ScheduleDraftOut(BaseModel):
     reviewed_by: int | None
     reviewed_at: datetime | None
     created_at: datetime
-
-
-class ScheduleDecision(BaseModel):
-    """PM decision on a schedule draft. Approving writes tasks.start/end; agents never do."""
-
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-
-    decision: Literal["approved", "rejected"]
-    comment: str = Field(default="", max_length=2000)
-
-    @model_validator(mode="after")
-    def _rules(self):
-        if self.decision == "rejected" and not self.comment:
-            raise ValueError("a comment is required when rejecting")
-        return self

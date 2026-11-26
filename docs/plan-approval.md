@@ -15,15 +15,22 @@ PM  POST /plan/generate ──► job agent3.schedule ──► DRAFT plan versi
                   version approved, tasks get start/end/critical, risks open, project active
 ```
 
+The Schedule tab shows the Agent 3 preview and the published Gantt as separate sections.
+Plan Review is the PM decision point for a generated schedule. The retired
+`POST /projects/{id}/scheduling/{draft_id}/decision` returns `410 Gone` for PMs on existing projects.
+`GET /projects/{id}/scheduling` still serves the preview, and previously published dates and
+historical schedule decisions remain available.
+
 ## Rules enforced in code (each has a test)
 - Agents write **drafts only**. Agent 4 has 7 read tools and 2 write tools (`save_draft_risks`,
   `save_plan_review`); there is no approve/reject tool, and no module under `app/agents` or `app/tools`
   imports the approval code (AST test). Only `services/plan_approval.py` sets a PlanVersion to `approved`.
 - `project_id` / `plan_version_id` come from the run context, never from tool arguments.
-- A plan can be approved only if: the project is in `plan_review`; the version is the current draft;
-  Agent 4 reviewed it; tasks / dependencies / team are unchanged since the draft was built
-  (`inputs_fingerprint`); and, when there are warnings (conflicts, `blocked` verdict, critical risk),
-  the PM sent `acknowledge_warnings: true`. `decided_by` is always the authenticated PM.
+- Approval requires a project in `plan_review`, the current reviewed draft, and matching plan inputs
+  (project dates, approved tasks, dependencies, and team capacity and availability). If the review
+  has warnings, submit `acknowledge_warnings: true` with the `warnings_token` from the version detail.
+  A `409` with `code: warnings_changed` requires fetching the version again and reviewing the new
+  warnings. `decided_by` comes from the authenticated PM.
 - The automatic checks (`services/plan_rules.py`) always run; the agent's verdict can be raised by them,
   never lowered. Every risk needs severity, likelihood and evidence that exists in the plan.
 - A second deterministic floor comes from the saved risk register: a `high` risk forces at least
@@ -49,7 +56,7 @@ PM  POST /plan/generate ──► job agent3.schedule ──► DRAFT plan versi
 |---|---|---|
 | POST | `/projects/{id}/plan/generate` | queue Agent 3 (`overrides`: per-task `duration_days` / `assignee_member_id`) |
 | POST | `/projects/{id}/plan/review` | queue another Agent 4 review (`rules_only` skips the LLM) |
-| GET | `/projects/{id}/plan/versions`, `/versions/{v}` | list / detail (snapshot, risks, warnings, diffs) |
+| GET | `/projects/{id}/plan/versions`, `/versions/{v}` | list / detail (snapshot, risks, warnings, warning token, diffs) |
 | GET | `/projects/{id}/plan/versions/{v}/health` | deterministic plan health + evidence cap (no LLM) |
 | GET | `/projects/{id}/plan/diff?from_version=&to_version=` | diff of any two versions |
 | GET/POST | `/projects/{id}/plan/versions/{v}/gate`, `/open-gate` | gate state / (re)open |

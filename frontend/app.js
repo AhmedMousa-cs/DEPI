@@ -6,9 +6,21 @@ const MAX_UPLOAD = 5 * 1024 * 1024;
 const STATUS = { setup: "Setup", planning: "Planning", scope_review: "Scope review", plan_review: "Plan review", active: "Active", closed: "Closed" };
 const KIND = { brief: "Brief", transcript: "Transcript", note: "Note", file: "File" };
 
-const state = { me: null, projects: [], project: null, team: [], leaders: [], page: "portfolio", tab: "overview", modal: null, notice: null, navOpen: false, reqs: [], scope: null, gaps: null, reqFilter: "all", job: null, stories: [], tasks: [], coverage: null, planFilter: "all", planJob: null, schedule: null, scheduleJob: null, chain: null, pf: null, planVersions: [], planVersionSel: null, planVersionDetail: null, planGate: null, planReviewJob: null, planHealth: null, planRulesOnly: false, theme: localStorage.getItem("nx-theme") || "light", lang: localStorage.getItem("nx-lang") || "en" };
+const projectState = () => ({
+  project: null, team: [], leaders: [], tab: "overview", modal: null, notice: null,
+  reqs: [], scope: null, gaps: null, reqFilter: "all", job: null, chain: null,
+  stories: [], tasks: [], coverage: null, planReqs: [], planFilter: "all", planJob: null,
+  schedule: null, scheduleJob: null, changes: [],
+  planVersions: [], planVersionSel: null, planVersionDetail: null, planGate: null,
+  planReviewJob: null, planHealth: null, planRulesOnly: false,
+});
+const state = { ...projectState(), me: null, projects: [], page: "portfolio", navOpen: false, pf: null, theme: localStorage.getItem("nx-theme") || "light", lang: localStorage.getItem("nx-lang") || "en" };
+let projectContext = null;
+let tabRequest = 0;
 const app = document.getElementById("app");
 const isPM = () => state.me && state.me.role === "PM";
+const isCurrentProject = context => context !== null && context === projectContext;
+const isActiveJob = job => job && ["queued", "running"].includes(job.status);
 
 /* ---------- helpers ---------- */
 function esc(v) { return String(v == null ? "" : v).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
@@ -213,6 +225,7 @@ const AR = {
   "Approval warnings": "تحذيرات الاعتماد",
   "Warnings to acknowledge": "تحذيرات لازم تأكّدها",
   "I acknowledge these warnings": "أقرّ بأني اطلعت على التحذيرات دي",
+  "The approval warnings changed. Read the current warnings and submit again.": "تغيّرت تحذيرات الاعتماد. راجع التحذيرات الحالية وأعد إرسال القرار.",
   "No warnings: the conflicts, verdict and critical risks do not block this approval.": "لا توجد تحذيرات: التعارضات والحكم والمخاطر الحرجة لا تمنع الاعتماد.",
   "Shown before approval; the PM must acknowledge them explicitly.": "تظهر قبل الاعتماد؛ ومدير المشروع لازم يقرّ بيها صراحة.",
   "No risks stored for this version.": "مفيش مخاطر محفوظة للنسخة دي.",
@@ -222,12 +235,12 @@ const AR = {
   "LangGraph review over the snapshot: rules may raise a concern but can never lower the agent's verdict.": "مراجعة LangGraph على اللقطة: القواعد تقدر ترفع قلق لكن ما تقدرش تقلل من حكم الوكيل.",
   "The approval gate is open — the project is in Plan review.": "بوابة الاعتماد مفتوحة — المشروع في مرحلة مراجعة الخطة.",
   "Opening the gate moves the project to Plan review and waits for your decision.": "فتح البوابة ينقل المشروع لمراجعة الخطة وينتظر قرارك.",
-  "The gate is open: approving writes the snapshot dates to every task and moves the project to active. Rejecting archives the draft risks and writes nothing.": "البوابة مفتوحة: الاعتماد يكتب تواريخ اللقطة على كل مهمة وينقل المشروع للنشاط. الرفض يؤرشف مخاطر المسودة ولا يكتب أي شيء.",
+  "The gate is open. Approval applies the planned dates and activates the project. Rejection archives the draft risks.": "بوابة الاعتماد مفتوحة. الاعتماد يطبّق التواريخ المخططة وينقل المشروع إلى نشط. الرفض يؤرشف مخاطر المسودة.",
   "This plan is approved. Its snapshot dates are live on the tasks.": "الخطة دي معتمدة. تواريخها الحالية مطبقة على المهام.",
   "This version was rejected. Nothing was written to the tasks.": "النسخة دي اترفضت. لم يُكتب أي شيء على المهام.",
   "Plan rejected. Nothing was written to the tasks.": "تم رفض الخطة. لم يُكتب أي شيء على المهام.",
   "The draft is rejected and its risks are archived. Nothing is written to the tasks.": "يتم رفض المسودة وأرشفة مخاطرها. لا يُكتب أي شيء على المهام.",
-  "Approving writes the snapshot dates to every task and moves the project to active.": "الاعتماد يكتب تواريخ اللقطة على كل مهمة وينقل المشروع للنشاط.",
+  "Approving applies the dates from this plan version and moves the project to active.": "الاعتماد يطبّق تواريخ هذه النسخة من الخطة وينقل المشروع إلى نشط.",
   "task date(s) written.": "تاريخ مهمة تم كتابته.",
   "Built by": "أُنشئت بواسطة",
   "based on v": "مبنية على النسخة ",
@@ -281,14 +294,22 @@ const AR = {
   "How durations were estimated": "كيف حُسبت المدد",
   "Run Agent 3": "تشغيل Agent 3",
   "Scheduling...": "جارٍ الجدولة…",
-  "No schedule yet": "لا جدولة بعد",
-  "Approve the work plan tasks, then run Agent 3 to compute the project schedule.": "اعتمد مهام خطة العمل ثم شغّل Agent 3 لحساب الجدولة.",
-  "Approve & write dates": "اعتماد وكتابة التواريخ",
+  "Review plan": "مراجعة الخطة",
+  "No schedule preview": "لا توجد معاينة للجدولة",
+  "Run Agent 3 after approving the work plan tasks to generate a preview.": "شغّل الوكيل 3 بعد اعتماد مهام خطة العمل لإنشاء معاينة.",
+  "Run Agent 3? It generates a schedule preview and a draft for Plan review.": "هل تريد تشغيل الوكيل 3؟ سينشئ معاينة للجدولة ومسودة لمراجعة الخطة.",
+  "Agent 3 schedule preview": "معاينة الجدولة من الوكيل 3",
+  "Preview generated": "وقت إنشاء المعاينة",
   "Reject": "رفض",
   "Overloaded": "محمّل فوق طاقته",
   "No members": "لا أعضاء",
   "Add team members to see capacity.": "أضف أعضاء الفريق لرؤية السعة.",
-  "Deterministic dates, critical path, resource conflicts and capacity. Task dates are written only when you approve the draft.": "تواريخ حتمية، مسار حرج، تعارضات موارد وسعة. تواريخ المهام تُكتب فقط عند اعتماد المسودة.",
+  "Track delivery and preview the schedule calculated by Agent 3. Use Plan review to approve proposed dates.": "تابع التنفيذ وعاين الجدولة التي حسبها الوكيل 3. اعتمد التواريخ المقترحة من شاشة مراجعة الخطة.",
+  "Approve all draft requirements and the scope, run coverage analysis, then generate and approve all draft stories and tasks? Agent 3 will build a draft plan for review. The final plan approval stays in Plan review.": "هل تريد اعتماد كل مسودات المتطلبات والنطاق، وتحليل التغطية، ثم إنشاء واعتماد كل مسودات القصص والمهام؟ سيبني الوكيل 3 مسودة للمراجعة. يتم الاعتماد النهائي من شاشة مراجعة الخطة.",
+  "Agent 3 built the draft. Open Plan review to check the findings and decide on the plan.": "أنشأ الوكيل 3 المسودة. افتح مراجعة الخطة للاطلاع على النتائج واتخاذ القرار.",
+  "Open Scope review to extract and approve requirements. Build the work plan with Agent 2, then review and approve the schedule in Plan review.": "افتح مراجعة النطاق لاستخراج المتطلبات واعتمادها. جهّز خطة العمل مع الوكيل 2، ثم راجع الجدولة واعتمدها من شاشة مراجعة الخطة.",
+  "Draft stories and tasks approved. Run Agent 3 to build the plan for review.": "تم اعتماد مسودات القصص والمهام. شغّل الوكيل 3 لإعداد الخطة للمراجعة.",
+  "The decision was saved. Refresh to load the latest project data.": "تم حفظ القرار. حدّث الصفحة لتحميل أحدث بيانات المشروع.",
   "Approved": "معتمدة",
   "Rejected": "مرفوضة",
   "Draft": "مسودة",
@@ -298,15 +319,11 @@ const AR = {
   "No resource conflicts: nobody is overallocated and every task fits its assignee availability.": "لا تعارضات موارد: لا أحد محمّل فوق طاقته وكل مهمة تناسب توافر المسؤول عنها.",
   "One representative chain with zero float. Any delay here moves the project end.": "سلسلة تمثيلية بدون أي مرونة. أي تأخير هنا يأخّر نهاية المشروع.",
   "No critical chain stored.": "لا سلسلة حرجة محفوظة.",
-  "Computed by code (CPM over working days, Fri+Sat weekend). The LLM never produces dates.": "حُسبت بالكود (CPM على أيام العمل، عطلة الجمعة والسبت). الـ LLM لا ينتج تواريخ أبدًا.",
+  "The preview uses the critical path method with a Friday–Saturday weekend.": "تستخدم المعاينة طريقة المسار الحرج مع عطلة يومي الجمعة والسبت.",
   "Why this schedule": "لماذا هذه الجدولة",
   "No explanation stored.": "لا شرح محفوظ.",
-  "Task dates are live in the plan.": "تواريخ المهام صارت حية في الخطة.",
-  "Rejecting keeps the plan undated.": "الرفض يُبقي الخطة بدون تواريخ.",
-  "Approving writes start/end dates on every task (PM-locked tasks are skipped).": "الاعتماد يكتب تواريخ البداية/النهاية على كل مهمة (المهام المقفلة بالمدير تُستثنى).",
   "No goal added": "لا يوجد هدف",
   "No brief": "لا يوجد بريف",
-  "Next step: open Scope review to run extraction and approve the requirements — then plan with Agent 2 and schedule with Agent 3. Agents prepare drafts; you approve.": "الخطوة التالية: افتح مراجعة النطاق لتشغيل الاستخراج واعتماد المتطلبات — ثم الخطة مع Agent 2 والجدولة مع Agent 3. الـ agents يجهزوا المسودات، وأنت تعتمد.",
   "Brief and transcripts. Only extracted text is stored (.txt, .md, .docx, .pdf up to 5 MB).": "بريف ومحاضر. يُحفظ النص المستخرج فقط (.txt, .md, .docx, .pdf حتى 5 ميجابايت).",
   "Add source": "إضافة مصدر",
   "View text": "عرض النص",
@@ -482,7 +499,11 @@ async function api(path, options = {}) {
   if (res.status === 204) return null;
   let data = null;
   try { data = await res.json(); } catch (_) { /* no body */ }
-  if (!res.ok) throw new Error(errorMessage(data, res.status));
+  if (!res.ok) {
+    const error = new Error(errorMessage(data, res.status));
+    error.code = data && data.detail && data.detail.code;
+    throw error;
+  }
   return data;
 }
 const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body) });
@@ -499,15 +520,38 @@ function uploadSource(projectId, { kind, title, text, file }) {
 
 /* ---------- data loading ---------- */
 async function reloadProjects() { state.projects = await api("/projects"); }
-async function reloadProject() {
-  const id = state.project.id;
+async function reloadProject(context = projectContext) {
+  const { id } = context;
   const [project, team] = await Promise.all([api(`/projects/${id}`), api(`/projects/${id}/team`)]);
-  state.project = project; state.team = team;
+  if (isCurrentProject(context)) Object.assign(state, { project, team });
 }
-async function openProject(id) {
-  try { state.project = { id }; await reloadProject(); state.page = "project"; state.tab = "overview"; state.navOpen = false; }
-  catch (e) { state.page = "portfolio"; state.project = null; state.notice = { type: "error", text: e.message }; }
+function resetProject(context = null) {
+  if (projectContext) Object.values(projectContext.polls).forEach(poll => clearTimeout(poll.timer));
+  projectContext = context;
+  tabRequest++;
+  Object.assign(state, projectState(), { page: "portfolio", navOpen: false });
+}
+
+async function openProject(id, tab = "overview") {
+  if (projectContext?.id === id && state.project) {
+    state.navOpen = false;
+    await loadProjectTab(tab, projectContext);
+    return;
+  }
+  const context = { id, polls: {}, reviewRequest: 0 };
+  resetProject(context);
   render();
+  try {
+    await reloadProject(context);
+    if (!isCurrentProject(context)) return;
+    state.page = "project";
+    await loadProjectTab(tab, context);
+  } catch (e) {
+    if (!isCurrentProject(context) || e.message === "unauthorized") return;
+    resetProject();
+    state.notice = { type: "error", text: e.message };
+    render();
+  }
 }
 
 /* ---------- views ---------- */
@@ -537,7 +581,7 @@ async function loadPf() {
     else if (pf.tab === "risks" && !pf.risks) pf.risks = await api("/portfolio/risks");
     else if (!pf.overview) pf.overview = await api("/portfolio/overview");
   } catch (e) { if (e.message !== "unauthorized") { state.notice = { type: "error", text: e.message }; } }
-  render();
+  if (state.page === "portfolio") render();
 }
 
 function pfHealthPill(h) {
@@ -622,7 +666,7 @@ function projectView() {
 function overviewView() {
   const p = state.project, leader = state.team.find(m => m.is_leader);
   const hours = state.team.reduce((n, m) => n + Number(m.capacity_hours_per_week || 0), 0);
-  return `<div class="grid two-col"><section class="card section-card"><h2>Project snapshot</h2><p class="section-intro">Saved in PostgreSQL; survives a browser refresh.</p><div class="keyvals">${kv("Status", STATUS[p.status] || p.status)}${kv("Start", fmtDate(p.start_date))}${kv("Target end", fmtDate(p.end_date))}${kv("Team", state.team.length + " members · " + hours + " h/week")}${kv("Team Leader", leader ? leader.name + (leader.user_email ? " (" + leader.user_email + ")" : "") : "Not assigned")}${kv("Sources", String((p.sources || []).length))}</div></section><section class="card section-card"><h2>Project brief</h2><p class="section-intro">${esc(p.goal || "No goal added")}</p><div style="white-space:pre-wrap;font-size:13px">${esc(p.brief || "No brief")}</div></section></div><div class="callout">Next step: open <b>Scope review</b> to run extraction and approve the requirements — then plan with Agent 2 and schedule with Agent 3. Agents prepare drafts; you approve.</div>`;
+  return `<div class="grid two-col"><section class="card section-card"><h2>Project snapshot</h2><p class="section-intro">Saved in PostgreSQL; survives a browser refresh.</p><div class="keyvals">${kv("Status", STATUS[p.status] || p.status)}${kv("Start", fmtDate(p.start_date))}${kv("Target end", fmtDate(p.end_date))}${kv("Team", state.team.length + " members · " + hours + " h/week")}${kv("Team Leader", leader ? leader.name + (leader.user_email ? " (" + leader.user_email + ")" : "") : "Not assigned")}${kv("Sources", String((p.sources || []).length))}</div></section><section class="card section-card"><h2>Project brief</h2><p class="section-intro">${esc(p.goal || "No goal added")}</p><div style="white-space:pre-wrap;font-size:13px">${esc(p.brief || "No brief")}</div></section></div>${isPM() ? `<div class="callout">${t("Open Scope review to extract and approve requirements. Build the work plan with Agent 2, then review and approve the schedule in Plan review.")}</div>` : ""}`;
 }
 
 function sourcesView() {
@@ -676,7 +720,7 @@ function modalView() {
 function render() {
   const notice = state.notice; state.notice = null;
   const body = state.page === "project" && state.project ? projectView() : portfolioView();
-  app.innerHTML = `<div class="app-shell">${sidebar()}<div class="main-area">${topbar()}<main class="content">${notice ? noticeHtml(notice) : ""}${body}</main></div></div>${state.modal ? (state.modal.type === "decide-req" || state.modal.type === "decide-req-bulk" ? scopeModal() : state.modal.type === "decide-story" || state.modal.type === "decide-task" ? planModal() : state.modal.type === "decide-schedule" ? scheduleModal() : state.modal.type === "plan-approve" || state.modal.type === "plan-reject" ? planGateModal() : modalView()) : ""}`;
+  app.innerHTML = `<div class="app-shell">${sidebar()}<div class="main-area">${topbar()}<main class="content">${notice ? noticeHtml(notice) : ""}${body}</main></div></div>${state.modal ? (state.modal.type === "decide-req" || state.modal.type === "decide-req-bulk" ? scopeModal() : state.modal.type === "decide-story" || state.modal.type === "decide-task" ? planModal() : state.modal.type === "plan-approve" || state.modal.type === "plan-reject" ? planGateModal() : modalView()) : ""}`;
   translateDom(app);
 }
 
@@ -693,7 +737,20 @@ const actions = {
   "toggle-theme": () => { state.theme = state.theme === "dark" ? "light" : "dark"; localStorage.setItem("nx-theme", state.theme); applyPrefs(); render(); },
   "toggle-lang": () => { state.lang = state.lang === "ar" ? "en" : "ar"; localStorage.setItem("nx-lang", state.lang); applyPrefs(); render(); },
   "logout": () => logout(),
-  "go-portfolio": async () => { await reloadProjects(); state.page = "portfolio"; state.project = null; state.navOpen = false; if (state.pf) { state.pf.overview = state.pf.resources = state.pf.risks = null; } render(); loadPf(); },
+  "go-portfolio": async () => {
+    resetProject();
+    const request = tabRequest;
+    if (state.pf) state.pf.overview = state.pf.resources = state.pf.risks = null;
+    render();
+    try {
+      await reloadProjects();
+      if (request === tabRequest) await loadPf();
+    } catch (e) {
+      if (request !== tabRequest || e.message === "unauthorized") return;
+      state.notice = { type: "error", text: e.message };
+      render();
+    }
+  },
   "pf-tab": t => { const pf = pfState(); pf.tab = t.dataset.tab; render(); loadPf(); if (pf.tab === "assistant") pfScrollChat(); },
   "pf-send": async () => {
     const pf = pfState();
@@ -745,13 +802,12 @@ const actions = {
     if (s.action === "view_risks") { pf.tab = "risks"; render(); loadPf(); return; }
     if (s.action === "view_resources") { pf.tab = "resources"; render(); loadPf(); return; }
     if (s.project_id != null) {
-      await openProject(s.project_id);
-      if (s.action === "review_drafts") { state.tab = "scope"; render(); }
-      else if (s.action === "schedule") { state.tab = "schedule"; render(); }
+      const linkedTab = { review_drafts: "scope", schedule: "schedule" }[s.action];
+      await openProject(s.project_id, linkedTab);
     }
   },
   "open-project": t => openProject(Number(t.dataset.id)),
-  "tab": t => { state.tab = t.dataset.tab; render(); },
+  "tab": el => loadProjectTab(el.dataset.tab),
   "modal": t => { state.modal = { type: t.dataset.modal }; render(); },
   "close-modal": closeModal,
   "backdrop-close": (t, ev) => { if (ev.target === t) closeModal(); },
@@ -847,18 +903,20 @@ const submitters = {
 app.addEventListener("click", async ev => {
   const t = ev.target.closest("[data-action]");
   if (!t || !actions[t.dataset.action]) return;
+  const context = projectContext;
   try { await actions[t.dataset.action](t, ev); }
-  catch (e) { if (e.message !== "unauthorized") { state.notice = { type: "error", text: e.message }; render(); } }
+  catch (e) { if (e.message !== "unauthorized" && context === projectContext) { state.notice = { type: "error", text: e.message }; render(); } }
 });
 
 app.addEventListener("submit", async ev => {
   const form = ev.target.closest("form[data-form]");
   if (!form) return;
   ev.preventDefault();
+  const context = projectContext, modal = state.modal;
   const btn = form.querySelector('button[type="submit"]');
   if (btn) btn.disabled = true;
   try { await submitters[form.dataset.form](form); }
-  catch (e) { if (e.message !== "unauthorized") { showModalError(e.message); if (btn) btn.disabled = false; } }
+  catch (e) { if (e.message !== "unauthorized" && context === projectContext && modal === state.modal) { showModalError(e.message); if (btn) btn.disabled = false; } }
 });
 
 /* ---------- boot ---------- */
@@ -878,33 +936,16 @@ app.addEventListener("submit", async ev => {
 const REQ_TYPES = ["functional", "non_functional", "feature", "decision"];
 const REQ_PRIORITIES = ["high", "medium", "low"];
 const SUSPICIOUS = /ignore (all )?(the )?(previous|prior)|disregard (all )?(the )?(previous|prior)|تجاهل (كل )?التعليمات/i;
-let jobTimer = null;
 
-async function reloadScope() {
-  const id = state.project.id;
-  const [reqs, scope] = await Promise.all([
+async function reloadScope(context = projectContext) {
+  const { id } = context;
+  const [reqs, scope, gaps] = await Promise.all([
     api(`/projects/${id}/requirements`),
     api(`/projects/${id}/scope/status`).catch(e => { if (e.message === "unauthorized") throw e; return null; }),
+    api(`/projects/${id}/requirements/gaps`).catch(e => { if (e.message === "unauthorized") throw e; return null; }),
   ]);
-  state.reqs = reqs; state.scope = scope;
-  state.gaps = await api(`/projects/${id}/requirements/gaps`).catch(e => { if (e.message === "unauthorized") throw e; return null; });
-}
-
-function pollJob(id) {
-  clearInterval(jobTimer);
-  const tick = async () => {
-    try {
-      const j = await api(`/jobs/${id}`);
-      state.job = j;
-      const finished = ["done", "failed", "cancelled", "waiting_for_pm"].includes(j.status);
-      if (finished) clearInterval(jobTimer);
-      if (state.page === "project" && state.tab === "scope") {
-        if (finished) await reloadScope();
-        if (!state.modal) render();
-      }
-    } catch (e) { clearInterval(jobTimer); }
-  };
-  tick(); jobTimer = setInterval(tick, 3000);
+  if (isCurrentProject(context)) Object.assign(state, { reqs, scope, gaps });
+  return gaps;
 }
 
 /* M10: download the deterministic PDF report (fetch -> blob, token in header). */
@@ -1018,50 +1059,94 @@ function scopeModal() {
 }
 
 const reqById = id => state.reqs.find(r => r.id === Number(id));
-const baseTab = actions.tab;
-Object.assign(actions, {
-  "tab": async t => {
-    if (t.dataset.tab === "scope") {
-      await reloadScope();
-      try {
-        const jobs = await api(`/projects/${state.project.id}/jobs`);
-        const active = jobs.find(j => j.type === "agent1.extract" && ["queued", "running"].includes(j.status));
-        if (active) { state.job = active; pollJob(active.id); }
-      } catch (e) { if (e.message === "unauthorized") throw e; }
+const projectTabs = {
+  scope: { load: reloadScope, jobKey: "job", types: ["agent1.extract"] },
+  plan: { load: reloadPlan, jobKey: "planJob", types: ["agent2.plan"] },
+  schedule: { load: reloadSchedule, jobKey: "scheduleJob", types: ["agent3.schedule"] },
+  planreview: { load: context => Promise.all([reloadPlanReview(true, context), reloadProject(context)]), jobKey: "planReviewJob", types: ["agent3.schedule", "agent4.review"] },
+  changes: { load: reloadChanges },
+};
+
+async function loadProjectJobs(context) {
+  return api(`/projects/${context.id}/jobs`).catch(e => { if (e.message === "unauthorized") throw e; return null; });
+}
+
+async function loadProjectTab(tab, context = projectContext) {
+  if (!isCurrentProject(context)) return;
+  const request = ++tabRequest;
+  const modal = state.modal;
+  const current = () => isCurrentProject(context) && request === tabRequest && state.modal === modal;
+  const config = projectTabs[tab];
+  try {
+    if (config) await config.load(context);
+    const jobs = current() && config?.jobKey ? await loadProjectJobs(context) : null;
+    if (!current()) return;
+    state.tab = tab;
+    state.modal = null;
+    if (jobs) {
+      const active = jobs.find(job => config.types.includes(job.type) && isActiveJob(job));
+      if (active) pollProjectJob(context, tab, active);
+      else if (state[config.jobKey]) state[config.jobKey] = jobs.find(job => job.id === state[config.jobKey].id) || null;
     }
-    if (t.dataset.tab === "plan") {
-      await reloadPlan();
-      try {
-        const jobs = await api(`/projects/${state.project.id}/jobs`);
-        const active = jobs.find(j => j.type === "agent2.plan" && ["queued", "running"].includes(j.status));
-        if (active) { state.planJob = active; pollPlanJob(active.id); }
-      } catch (e) { if (e.message === "unauthorized") throw e; }
-    }
-    if (t.dataset.tab === "schedule") {
-      await reloadSchedule();
-      try {
-        const jobs = await api(`/projects/${state.project.id}/jobs`);
-        const active = jobs.find(j => j.type === "agent3.schedule" && ["queued", "running"].includes(j.status));
-        if (active) { state.scheduleJob = active; pollScheduleJob(active.id); }
-      } catch (e) { if (e.message === "unauthorized") throw e; }
-    }
-    if (t.dataset.tab === "changes") {
-      await reloadChanges();
-    }
-    if (t.dataset.tab === "planreview") {
-      await reloadPlanReview(true);
-      try {
-        const jobs = await api(`/projects/${state.project.id}/jobs`);
-        const active = jobs.find(j => ["agent4.review", "agent3.schedule"].includes(j.type) && ["queued", "running"].includes(j.status));
-        if (active) { state.planReviewJob = active; pollPlanReviewJob(active.id); }
-        else if (state.planReviewJob) {
-          // Never keep a stale "queued" line after a restart: reconcile with the server.
-          state.planReviewJob = jobs.find(j => j.id === state.planReviewJob.id) || null;
+    render();
+  } catch (e) {
+    if (current()) throw e;
+  }
+}
+
+function pollProjectJob(context, tab, job) {
+  if (!isCurrentProject(context)) return;
+  const { jobKey, load } = projectTabs[tab];
+  const previous = context.polls[tab];
+  if (previous?.id === job.id) return;
+  if (previous) clearTimeout(previous.timer);
+  const poll = { id: job.id, timer: null };
+  context.polls[tab] = poll;
+  state[jobKey] = job;
+  const current = () => isCurrentProject(context) && context.polls[tab] === poll;
+  const visible = () => current() && state.tab === tab && !state.modal;
+
+  const tick = async () => {
+    try {
+      const updated = await api(`/jobs/${poll.id}`);
+      if (!current()) return;
+      state[jobKey] = updated;
+      const finished = ["done", "failed", "cancelled", "waiting_for_pm"].includes(updated.status);
+      if (finished && tab === "planreview") {
+        if (updated.type === "agent4.review" && state.planRulesOnly) {
+          state.planRulesOnly = false;
+          if (updated.status === "done" && visible()) state.notice = { type: "ok", text: t("Review saved from automatic checks.") };
         }
-      } catch (e) { if (e.message === "unauthorized") throw e; }
+        if (updated.type === "agent3.schedule" && updated.status === "done") {
+          const jobs = await loadProjectJobs(context);
+          if (!current()) return;
+          const next = jobs?.find(item => item.type === "agent4.review" && isActiveJob(item));
+          if (next) {
+            pollProjectJob(context, tab, next);
+            if (state.tab === tab && !state.modal) render();
+            return;
+          }
+        }
+      }
+      if (finished && state.tab === tab) await load(context);
+      if (!current()) return;
+      if (visible()) render();
+      if (finished) delete context.polls[tab];
+      else poll.timer = setTimeout(tick, 3000);
+    } catch (e) {
+      if (!current()) return;
+      if (e.message !== "unauthorized" && isActiveJob(state[jobKey])) {
+        state[jobKey] = null;
+        if (tab === "planreview") state.planRulesOnly = false;
+        if (visible()) render();
+      }
+      delete context.polls[tab];
     }
-    baseTab(t);
-  },
+  };
+  tick();
+}
+
+Object.assign(actions, {
   "scope-filter": t => { state.reqFilter = t.dataset.f; render(); },
   "req-approve": async t => {
     await post(`/projects/${state.project.id}/requirements/${t.dataset.id}/decision`, { decision: "approved" });
@@ -1086,8 +1171,11 @@ Object.assign(actions, {
   },
   "run-extract": async () => {
     if (!confirm("Run extraction? New draft requirements will be added for review.")) return;
-    const job = await post(`/projects/${state.project.id}/jobs`, { type: "agent1.extract" });
-    state.job = job; render(); pollJob(job.id);
+    const context = projectContext;
+    const job = await post(`/projects/${context.id}/jobs`, { type: "agent1.extract" });
+    if (!isCurrentProject(context)) return;
+    pollProjectJob(context, "scope", job);
+    if (state.tab === "scope" && !state.modal) render();
   },
   "open-gate": async () => {
     await api(`/projects/${state.project.id}/scope/open`, { method: "POST" });
@@ -1100,50 +1188,59 @@ Object.assign(actions, {
     state.notice = { type: "ok", text: "Scope approved." }; render();
   },
   "accept-all": async () => {
-    const id = state.project.id;
-    if (!confirm("Accept everything?\n\n1. All draft requirements are approved\n2. The scope is approved\n3. The LLM coverage analysis runs\n4. Agent 2 generates the plan and all its drafts are approved\n5. Agent 3 computes the schedule draft\n\nYou still review and approve the schedule yourself — that is what writes the dates.")) return;
-    // Only switch to the schedule at the end if the PM stayed where they started.
-    // Moving them while they read another tab is disorienting; the notice is enough.
-    const startedTab = state.tab;
-    state.chain = "Approving requirements..."; render();
+    const context = projectContext;
+    const { id } = context;
+    if (!confirm(t("Approve all draft requirements and the scope, run coverage analysis, then generate and approve all draft stories and tasks? Agent 3 will build a draft plan for review. The final plan approval stays in Plan review."))) return;
+    const startedTabRequest = tabRequest;
+    const drafts = state.reqs.filter(r => r.status === "draft").map(r => r.id);
+    const updateStep = message => {
+      if (!isCurrentProject(context)) return;
+      state.chain = message;
+      if (state.tab === "scope" && !state.modal) render();
+    };
+    updateStep("Approving requirements...");
     try {
-      const drafts = state.reqs.filter(r => r.status === "draft").map(r => r.id);
       if (drafts.length) await post(`/projects/${id}/requirements/decision`, { ids: drafts, decision: "approved" });
-      state.chain = "Approving the scope..."; render();
+      updateStep("Approving the scope...");
       await post(`/projects/${id}/scope/approve`, { comment: "Accepted all requirements." });
-      await reloadProject(); await reloadScope(); render();
-      state.chain = "Analyzing coverage gaps with the LLM..."; render();
-      if (state.gaps && state.gaps.llm && state.gaps.llm.prompt_version) {
-        // Agent 1 already ran the analysis after extraction; the stored report covers these reqs
-        state.notice = { type: "ok", text: "Using the coverage analysis that ran after the extraction." }; render();
-      } else {
-        try { state.gaps = await post(`/projects/${id}/requirements/gaps/analyze`, {}); }
+      await reloadProject(context);
+      const gaps = await reloadScope(context);
+      updateStep("Analyzing coverage gaps with the LLM...");
+      if (!gaps?.llm?.prompt_version) {
+        try {
+          const report = await post(`/projects/${id}/requirements/gaps/analyze`, {});
+          if (isCurrentProject(context)) state.gaps = report;
+        }
         catch (e) { if (e.message === "unauthorized") throw e; }
       }
-      state.chain = "Running Agent 2 (stories & tasks)..."; render();
+      updateStep("Running Agent 2 (stories & tasks)...");
       const j2 = await post(`/projects/${id}/jobs`, { type: "agent2.plan" });
-      state.planJob = j2; await waitForJob(j2.id);
-      await reloadPlan();
-      state.chain = "Approving the plan drafts..."; render();
-      const sIds = state.stories.filter(s => s.review_status === "draft").map(s => s.id);
+      if (isCurrentProject(context)) state.planJob = j2;
+      await waitForJob(j2.id);
+      const plan = await reloadPlan(context);
+      updateStep("Approving the plan drafts...");
+      const sIds = plan.stories.filter(s => s.review_status === "draft").map(s => s.id);
       if (sIds.length) await post(`/projects/${id}/stories/decision`, { ids: sIds, decision: "approved" });
-      await reloadPlan();
-      const rejectedStories = new Set(state.stories.filter(s => s.review_status === "rejected").map(s => s.id));
-      const tIds = state.tasks.filter(x => x.review_status === "draft" && !rejectedStories.has(x.story_id)).map(x => x.id);
+      const reviewed = await reloadPlan(context);
+      const rejectedStories = new Set(reviewed.stories.filter(s => s.review_status === "rejected").map(s => s.id));
+      const tIds = reviewed.tasks.filter(x => x.review_status === "draft" && !rejectedStories.has(x.story_id)).map(x => x.id);
       if (tIds.length) await post(`/projects/${id}/tasks/decision`, { ids: tIds, decision: "approved" });
-      await reloadPlan(); render();
-      state.chain = "Running Agent 3 (schedule)..."; render();
-      const j3 = await post(`/projects/${id}/jobs`, { type: "agent3.schedule" });
-      state.scheduleJob = j3; await waitForJob(j3.id);
-      await reloadSchedule();
+      await reloadPlan(context);
+      updateStep("Running Agent 3 (schedule)...");
+      const j3 = await post(`/projects/${id}/plan/generate`, {});
+      if (isCurrentProject(context)) state.scheduleJob = j3;
+      const generated = await waitForJob(j3.id);
+      if (!isCurrentProject(context)) return;
+      state.scheduleJob = generated;
       state.chain = null;
-      if (state.page === "project" && state.project && state.project.id === id && state.tab === startedTab) state.tab = "schedule";
-      state.notice = { type: "ok", text: "Everything is ready — review the schedule draft and approve it to write the dates." };
-      render();
+      state.notice = { type: "ok", text: t("Agent 3 built the draft. Open Plan review to check the findings and decide on the plan.") };
+      if (tabRequest === startedTabRequest && !state.modal) await loadProjectTab("planreview", context);
+      else if (!state.modal) render();
     } catch (e) {
+      if (!isCurrentProject(context) || e.message === "unauthorized") return;
       state.chain = null;
       state.notice = { type: "error", text: "Stopped here: " + (e.message || "unknown error") + " — you can continue manually from this step." };
-      render();
+      if (!state.modal) render();
     }
   },
 });
@@ -1169,34 +1266,16 @@ Object.assign(submitters, {
 });
 
 /* ===== Work plan / Agent 2 (M5) ===== */
-let planTimer = null;
-
-async function reloadPlan() {
-  const id = state.project.id;
+async function reloadPlan(context = projectContext) {
+  const { id } = context;
   const [stories, tasks, coverage, reqs] = await Promise.all([
     api(`/projects/${id}/stories`),
     api(`/projects/${id}/tasks`),
     api(`/projects/${id}/planning/coverage`),
     api(`/projects/${id}/requirements`).catch(e => { if (e.message === "unauthorized") throw e; return []; }),
   ]);
-  state.stories = stories; state.tasks = tasks; state.coverage = coverage; state.planReqs = reqs;
-}
-
-function pollPlanJob(id) {
-  clearInterval(planTimer);
-  const tick = async () => {
-    try {
-      const j = await api(`/jobs/${id}`);
-      state.planJob = j;
-      const finished = ["done", "failed", "cancelled", "waiting_for_pm"].includes(j.status);
-      if (finished) clearInterval(planTimer);
-      if (state.page === "project" && state.tab === "plan") {
-        if (finished) await reloadPlan();
-        if (!state.modal) render();
-      }
-    } catch (e) { clearInterval(planTimer); }
-  };
-  tick(); planTimer = setInterval(tick, 3000);
+  if (isCurrentProject(context)) Object.assign(state, { stories, tasks, coverage, planReqs: reqs });
+  return { stories, tasks };
 }
 
 const planBadge = s => s === "approved" ? '<span class="badge green">Approved</span>' : s === "rejected" ? '<span class="badge" style="background:#fde8e8;color:#b00020">Rejected</span>' : '<span class="badge blue">Draft</span>';
@@ -1285,21 +1364,27 @@ Object.assign(actions, {
   "task-reject": t => { state.modal = { type: "decide-task", mode: "rejected", item: planTaskById(t.dataset.id) }; render(); },
   "run-plan": async () => {
     if (!confirm("Run Agent 2? New draft stories and tasks will be generated from the approved requirements. PM decisions are kept.")) return;
-    const job = await post(`/projects/${state.project.id}/jobs`, { type: "agent2.plan" });
-    state.planJob = job; render(); pollPlanJob(job.id);
+    const context = projectContext;
+    const job = await post(`/projects/${context.id}/jobs`, { type: "agent2.plan" });
+    if (!isCurrentProject(context)) return;
+    pollProjectJob(context, "plan", job);
+    if (state.tab === "plan" && !state.modal) render();
   },
   "plan-approve-all": async () => {
-    const id = state.project.id;
+    const context = projectContext;
+    const { id } = context;
     const sIds = state.stories.filter(s => s.review_status === "draft").map(s => s.id);
     if (!sIds.length && !state.tasks.some(x => x.review_status === "draft")) { state.notice = { type: "ok", text: "Nothing to approve — every story and task is decided." }; render(); return; }
     if (!confirm(`Approve all draft stories (${sIds.length}) and their draft tasks in one go?`)) return;
     if (sIds.length) await post(`/projects/${id}/stories/decision`, { ids: sIds, decision: "approved" });
-    await reloadPlan();
-    const rejectedStories = new Set(state.stories.filter(s => s.review_status === "rejected").map(s => s.id));
-    const tIds = state.tasks.filter(x => x.review_status === "draft" && !rejectedStories.has(x.story_id)).map(x => x.id);
+    const { stories, tasks } = await reloadPlan(context);
+    const rejectedStories = new Set(stories.filter(s => s.review_status === "rejected").map(s => s.id));
+    const tIds = tasks.filter(x => x.review_status === "draft" && !rejectedStories.has(x.story_id)).map(x => x.id);
     if (tIds.length) await post(`/projects/${id}/tasks/decision`, { ids: tIds, decision: "approved" });
-    await reloadPlan();
-    state.notice = { type: "ok", text: "Plan approved — Agent 3 can now compute the schedule." }; render();
+    await reloadPlan(context);
+    if (!isCurrentProject(context) || state.tab !== "plan" || state.modal) return;
+    state.notice = { type: "ok", text: t("Draft stories and tasks approved. Run Agent 3 to build the plan for review.") };
+    render();
   },
 });
 
@@ -1329,35 +1414,15 @@ Object.assign(submitters, {
 });
 
 /* ===== Schedule / Agent 3 (M6.1) ===== */
-let scheduleTimer = null;
-
-async function reloadSchedule() {
-  const id = state.project.id;
+async function reloadSchedule(context = projectContext) {
+  const { id } = context;
   const [draft, tasks] = await Promise.all([
     api(`/projects/${id}/scheduling`).catch(e => { if (e.message === "unauthorized") throw e; return null; }),
     api(`/projects/${id}/tasks`),
   ]);
-  state.schedule = draft; state.tasks = tasks;
+  if (isCurrentProject(context)) Object.assign(state, { schedule: draft, tasks });
 }
 
-function pollScheduleJob(id) {
-  clearInterval(scheduleTimer);
-  const tick = async () => {
-    try {
-      const j = await api(`/jobs/${id}`);
-      state.scheduleJob = j;
-      const finished = ["done", "failed", "cancelled", "waiting_for_pm"].includes(j.status);
-      if (finished) clearInterval(scheduleTimer);
-      if (state.page === "project" && state.tab === "schedule") {
-        if (finished) await reloadSchedule();
-        if (!state.modal) render();
-      }
-    } catch (e) { clearInterval(scheduleTimer); }
-  };
-  tick(); scheduleTimer = setInterval(tick, 3000);
-}
-
-const scheduleBadge = s => s === "approved" ? '<span class="badge green">Approved</span>' : s === "rejected" ? '<span class="badge" style="background:#fde8e8;color:#b00020">Rejected</span>' : s === "superseded" ? '<span class="badge">Superseded</span>' : '<span class="badge blue">Draft</span>';
 const estimateBadge = s => s === "llm" ? '<span class="badge blue">LLM</span>' : s === "pm" ? '<span class="badge green">PM</span>' : '<span class="badge">Hours→days</span>';
 const memberName = id => { const m = state.team.find(x => String(x.id) === String(id)); return m ? m.name : null; };
 
@@ -1437,14 +1502,13 @@ function ganttView() {
 const DELIVERY_STATUS = { todo: "To do", in_progress: "In progress", done: "Done" };
 
 /* ---------- M11 change management (approved-task edits as formal change requests) ---------- */
-async function reloadChanges() {
-  const id = state.project.id;
+async function reloadChanges(context = projectContext) {
+  const { id } = context;
   const [changes, tasks] = await Promise.all([
     api(`/projects/${id}/changes`).catch(e => { if (e.message === "unauthorized") throw e; return []; }),
     state.tasks.length ? Promise.resolve(state.tasks) : api(`/projects/${id}/tasks`),
   ]);
-  state.changes = changes;
-  if (tasks !== state.tasks) state.tasks = tasks;
+  if (isCurrentProject(context)) Object.assign(state, { changes, tasks });
 }
 
 const CHANGE_FIELD_LABEL = { title: "Title", estimate_hours: "Estimate (h)", start: "Start", end: "End", assignee_member_id: "Assignee" };
@@ -1505,8 +1569,9 @@ function scheduleView() {
   const jobLine = job ? `<div class="callout${job.status === "failed" ? " warning" : ""}">Scheduling job #${esc(job.id)}: <b>${esc(job.status)}</b> (${esc(job.progress)}%)${job.error ? "<br>" + esc(job.error) : ""}</div>` : "";
   const hint = !schedulable ? `<p class="subtle">Agent 3 needs the work plan approved: review the plan tasks first (project status: ${esc(state.project.status)}).</p>` : "";
 
-  const head = `<div class="page-head"><div><div class="eyebrow">Agent 3</div><h1>Schedule</h1><p>Deterministic dates, critical path, resource conflicts and capacity. Task dates are written only when you approve the draft.</p></div><div><button class="btn btn-primary" data-action="run-schedule"${running || !schedulable ? " disabled" : ""}>${running ? "Scheduling..." : "Run Agent 3"}</button>${hint}</div></div>`;
-  if (!d) return `${head}${jobLine}<section class="card"><div class="card-body"><div class="empty"><div class="empty-icon">◷</div><h3>No schedule yet</h3><p>Approve the work plan tasks, then run Agent 3 to compute the project schedule.</p></div></div></section>`;
+  const head = `<div class="page-head"><div><h1>Schedule</h1><p>Track delivery and preview the schedule calculated by Agent 3. Use Plan review to approve proposed dates.</p></div><div><div class="item-actions" style="margin:0"><button class="btn btn-primary" data-action="tab" data-tab="planreview">Review plan</button><button class="btn btn-secondary" data-action="run-schedule"${running || !schedulable ? " disabled" : ""}>${running ? "Scheduling..." : "Run Agent 3"}</button></div>${hint}</div></div>`;
+  const liveGantt = ganttView();
+  if (!d) return `${head}${jobLine}${liveGantt}<section class="card"><div class="card-body"><div class="empty"><div class="empty-icon">◷</div><h3>No schedule preview</h3><p>Run Agent 3 after approving the work plan tasks to generate a preview.</p></div></div></section>`;
 
   const p = d.payload || {};
   const schedule = p.schedule || { tasks: [], critical_path: [], project_start: d.project_start, project_end: d.project_end, total_duration_days: d.total_duration_days };
@@ -1515,11 +1580,6 @@ function scheduleView() {
   const conflicts = p.conflicts || [];
   const capacity = p.capacity || { members: [], total_available_hours: 0, total_assigned_hours: 0 };
   const explanation = p.explanation || {};
-  const decisions = d.review_status === "draft"
-    ? `<div class="item-actions" style="margin-top:12px"><button class="btn btn-primary" data-action="schedule-approve">Approve & write dates</button><button class="btn btn-secondary" data-action="schedule-reject">Reject</button></div><p class="subtle" style="margin-top:6px">Approving writes start/end dates on every task (PM-locked tasks are skipped). Rejecting keeps the plan undated.</p>`
-    : d.review_status === "rejected"
-      ? `<div class="callout warning" style="margin-top:12px">Rejected${d.pm_comment ? ": " + esc(d.pm_comment) : ""}. Re-run Agent 3 after fixing the plan.</div>`
-      : `<div class="callout" style="margin-top:12px">Approved${d.pm_comment ? ": " + esc(d.pm_comment) : ""}. Task dates are live in the plan.</div>`;
 
   const chain = (schedule.critical_path || []).map(id => esc(titles[id] || id)).join(' <span class="subtle">→</span> ');
   const taskRows = schedule.tasks.map(t => scheduleTaskRow(t, titles)).join("");
@@ -1537,16 +1597,14 @@ function scheduleView() {
   const explainList = (explanation.conflicts || []).concat(explanation.estimates || []).map(x => `<li>${esc(x)}</li>`).join("");
   const explainSource = explanation.source === "template" ? '<span class="badge">Template wording</span>' : explanation.source === "llm" ? '<span class="badge blue">LLM wording</span>' : "";
 
-  return `${head}${jobLine}
-${ganttView()}
+  return `${head}${jobLine}${liveGantt}
 <div class="grid two-col">
-  <section class="card section-card"><h2>Summary ${scheduleBadge(d.review_status)}</h2><p class="section-intro">Computed by code (CPM over working days, Fri+Sat weekend). The LLM never produces dates.</p>
+  <section class="card section-card"><h2>Agent 3 schedule preview</h2><p class="section-intro">The preview uses the critical path method with a Friday–Saturday weekend.</p>
     <div class="keyvals">${kv("Project start", fmtDate(schedule.project_start))}${kv("Project end", fmtDate(schedule.project_end))}${kv("Total duration", schedule.total_duration_days + " working days")}${kv("Tasks scheduled", String(schedule.tasks.length))}${kv("Conflicts", String(conflicts.length))}</div>
-    ${decisions}
   </section>
   <section class="card section-card"><h2>Why this schedule ${explainSource}</h2><p class="section-intro">${explanation.source === "template" ? "Deterministic template (the LLM was unavailable)." : "Written by the LLM from numbers the code computed — it cannot change them."}</p>
     ${explainLines || '<p class="subtle">No explanation stored.</p>'}${explainList ? `<ul style="margin:8px 0 0 18px;font-size:13px">${explainList}</ul>` : ""}
-    <p class="subtle" style="margin-top:10px">Draft #${esc(d.id)} · created ${esc(fmtDateTime(d.created_at))}${d.reviewed_at ? " · decided " + esc(fmtDateTime(d.reviewed_at)) : ""}</p>
+    <p class="subtle" style="margin-top:10px">${t("Preview generated")} ${esc(fmtDateTime(d.created_at))}</p>
   </section>
 </div>
 <section class="card section-card"><h2>Critical path</h2><p class="section-intro">One representative chain with zero float. Any delay here moves the project end.</p>
@@ -1558,38 +1616,32 @@ ${ganttView()}
 <section class="card section-card"><h2>How durations were estimated</h2><p class="section-intro">PM duration &gt; hours→days conversion &gt; LLM initial estimate (validated by code).</p><div class="card-body"><div class="project-list">${estimateRows}</div></div></section>`;
 }
 
-function scheduleModal() {
-  return modalShell("Reject schedule", "No task dates will be written. Explain what should change before re-running Agent 3.", "decide-schedule",
-    field("Reason *", '<textarea name="comment" required></textarea>', true), "Reject");
-}
-
 Object.assign(actions, {
   "run-schedule": async () => {
-    if (!confirm("Run Agent 3? It computes a draft schedule (dates, critical path, conflicts, capacity). Task dates change only when you approve the draft.")) return;
-    const job = await post(`/projects/${state.project.id}/jobs`, { type: "agent3.schedule" });
-    state.scheduleJob = job; render(); pollScheduleJob(job.id);
+    if (!confirm(t("Run Agent 3? It generates a schedule preview and a draft for Plan review."))) return;
+    const context = projectContext;
+    const job = await post(`/projects/${context.id}/plan/generate`, {});
+    if (!isCurrentProject(context)) return;
+    pollProjectJob(context, "schedule", job);
+    if (state.tab === "schedule" && !state.modal) render();
   },
-  "schedule-approve": async () => {
-    const d = state.schedule;
-    if (!confirm("Approve this schedule? Start/end dates are written on every task except PM-locked ones.")) return;
-    await post(`/projects/${state.project.id}/scheduling/${d.id}/decision`, { decision: "approved" });
-    await reloadSchedule(); await reloadPlan();
-    state.notice = { type: "ok", text: "Schedule approved and task dates written." }; render();
-  },
-  "schedule-reject": () => { state.modal = { type: "decide-schedule" }; render(); },
   "task-status": async el => {
+    const context = projectContext;
     const id = el.dataset.id, status = el.dataset.status;
-    await patch(`/projects/${state.project.id}/tasks/${id}/progress`, { status });
-    await reloadSchedule();
+    await patch(`/projects/${context.id}/tasks/${id}/progress`, { status });
+    await reloadSchedule(context);
+    if (!isCurrentProject(context) || state.tab !== "schedule" || state.modal) return;
     state.notice = { type: "ok", text: status === "done" ? "Task done — 100% recorded." : status === "todo" ? "Task reset to to-do (0%)." : "Task started — record progress with the % button as work advances." };
     render();
   },
   "task-progress": async el => {
+    const context = projectContext;
     const id = el.dataset.id;
     const input = document.querySelector(`[data-progress-input="${id}"]`);
     const pct = Math.max(0, Math.min(100, Number(input && input.value) || 0));
-    await patch(`/projects/${state.project.id}/tasks/${id}/progress`, { status: "in_progress", progress_pct: pct });
-    await reloadSchedule();
+    await patch(`/projects/${context.id}/tasks/${id}/progress`, { status: "in_progress", progress_pct: pct });
+    await reloadSchedule(context);
+    if (!isCurrentProject(context) || state.tab !== "schedule" || state.modal) return;
     state.notice = { type: "ok", text: `Progress saved: ${pct}%.` };
     render();
   },
@@ -1617,17 +1669,7 @@ Object.assign(actions, {
   },
 });
 
-Object.assign(submitters, {
-  "decide-schedule": async form => {
-    const d = new FormData(form);
-    await post(`/projects/${state.project.id}/scheduling/${state.schedule.id}/decision`, { decision: "rejected", comment: String(d.get("comment") || "").trim() });
-    state.modal = null; await reloadSchedule();
-    state.notice = { type: "ok", text: "Schedule rejected. No dates were written." }; render();
-  },
-});
-
 /* ---------- M6-B plan versions, Agent 4 review and the PM approval gate ---------- */
-let planReviewTimer = null;
 
 const PV_LABEL = { draft: "Draft", approved: "Approved", rejected: "Rejected", superseded: "Superseded" };
 const RISK_BADGE = { low: "green", medium: "blue", high: "", critical: "red" };
@@ -1637,66 +1679,24 @@ const RECOMMENDATION_VIEW = { approve: ["Approve", "green"], approve_with_change
 
 const pvBadge = s => `<span class="badge ${s === "approved" ? "green" : s === "rejected" ? "red" : s === "draft" ? "blue" : ""}">${esc(t(PV_LABEL[s] || s))}</span>`;
 
-async function reloadPlanReview(preferDraft = false) {
-  const id = state.project.id;
+async function reloadPlanReview(preferDraft = false, context = projectContext, selectedVersion = state.planVersionSel) {
+  const { id } = context;
+  const request = ++context.reviewRequest;
+  const current = () => isCurrentProject(context) && request === context.reviewRequest;
   const versions = await api(`/projects/${id}/plan/versions`).catch(e => { if (e.message === "unauthorized") throw e; return []; });
-  state.planVersions = versions;
-  if (preferDraft) {
-    const draft = versions.find(v => v.status === "draft");
-    if (draft) state.planVersionSel = draft.version;
+  if (!current()) return null;
+  const draft = versions.find(v => v.status === "draft");
+  if ((preferDraft && draft) || !versions.some(v => v.version === selectedVersion)) {
+    selectedVersion = draft?.version ?? versions[0]?.version ?? null;
   }
-  if (!versions.some(v => v.version === state.planVersionSel)) {
-    const draft = versions.find(v => v.status === "draft");
-    state.planVersionSel = draft ? draft.version : (versions[0] ? versions[0].version : null);
-  }
-  if (state.planVersionSel == null) { state.planVersionDetail = null; state.planGate = null; state.planHealth = null; return; }
-  const v = state.planVersionSel;
-  const [detail, gate, health] = await Promise.all([
-    api(`/projects/${id}/plan/versions/${v}`).catch(e => { if (e.message === "unauthorized") throw e; return null; }),
-    api(`/projects/${id}/plan/versions/${v}/gate`).catch(e => { if (e.message === "unauthorized") throw e; return null; }),
-    api(`/projects/${id}/plan/versions/${v}/health`).catch(e => { if (e.message === "unauthorized") throw e; return null; }),
+  const [detail, gate, health] = selectedVersion === null ? [null, null, null] : await Promise.all([
+    api(`/projects/${id}/plan/versions/${selectedVersion}`).catch(e => { if (e.message === "unauthorized") throw e; return null; }),
+    api(`/projects/${id}/plan/versions/${selectedVersion}/gate`).catch(e => { if (e.message === "unauthorized") throw e; return null; }),
+    api(`/projects/${id}/plan/versions/${selectedVersion}/health`).catch(e => { if (e.message === "unauthorized") throw e; return null; }),
   ]);
-  state.planVersionDetail = detail;
-  state.planGate = gate;
-  state.planHealth = health;
-}
-
-function pollPlanReviewJob(jobId) {
-  clearInterval(planReviewTimer);
-  const tick = async () => {
-    try {
-      const j = await api(`/jobs/${jobId}`);
-      state.planReviewJob = j;
-      const finished = ["done", "failed", "cancelled", "waiting_for_pm"].includes(j.status);
-      if (finished) {
-        clearInterval(planReviewTimer);
-        if (j.type === "agent4.review" && state.planRulesOnly) {
-          state.planRulesOnly = false;
-          if (j.status === "done") state.notice = { type: "ok", text: t("Review saved from automatic checks.") };
-        }
-        // Agent 3 queues an agent4.review when it finishes: keep the screen following it.
-        if (j.type === "agent3.schedule" && j.status === "done") {
-          try {
-            const jobs = await api(`/projects/${state.project.id}/jobs`);
-            const next = jobs.find(x => x.type === "agent4.review" && ["queued", "running"].includes(x.status));
-            if (next) { state.planReviewJob = next; pollPlanReviewJob(next.id); return; }
-          } catch (e) { if (e.message === "unauthorized") throw e; }
-        }
-      }
-      if (state.page === "project" && state.tab === "planreview") {
-        if (finished) { await reloadPlanReview(true); await reloadProject(); }
-        if (!state.modal) render();
-      }
-    } catch (e) {
-      clearInterval(planReviewTimer);
-      // A dropped poll (server restart, expired token) must not leave a frozen "queued" line.
-      if (e.message !== "unauthorized" && state.planReviewJob && ["queued", "running"].includes(state.planReviewJob.status)) {
-        state.planReviewJob = null;
-        if (state.page === "project" && state.tab === "planreview" && !state.modal) render();
-      }
-    }
-  };
-  tick(); planReviewTimer = setInterval(tick, 3000);
+  if (!current()) return null;
+  Object.assign(state, { planVersions: versions, planVersionSel: selectedVersion, planVersionDetail: detail, planGate: gate, planHealth: health });
+  return detail;
 }
 
 function pvValue(v) {
@@ -1830,7 +1830,7 @@ function planReviewView() {
     : `<div class="item-actions" style="margin-top:12px;flex-wrap:wrap">${gateState === "waiting_for_pm"
         ? `<button class="btn btn-primary" data-action="plan-approve">${t("Approve plan")}</button><button class="btn btn-secondary" data-action="plan-reject">${t("Reject plan")}</button>`
         : `<button class="btn btn-primary" data-action="plan-open-gate"${openable ? "" : " disabled"}>${t("Open approval gate")}</button>`}</div>
-      <p class="subtle" style="margin-top:6px">${gateState === "waiting_for_pm" ? t("The gate is open: approving writes the snapshot dates to every task and moves the project to active. Rejecting archives the draft risks and writes nothing.") : t("Opening the gate moves the project to Plan review and waits for your decision.")}</p>`;
+      <p class="subtle" style="margin-top:6px">${gateState === "waiting_for_pm" ? t("The gate is open. Approval applies the planned dates and activates the project. Rejection archives the draft risks.") : t("Opening the gate moves the project to Plan review and waits for your decision.")}</p>`;
 
   const warningsHtml = warnings.length ? `<div class="callout warning"><b>${t("Warnings to acknowledge")}</b><br>${warnings.map(esc).join("<br>")}</div>` : `<div class="callout">${t("No warnings: the conflicts, verdict and critical risks do not block this approval.")}</div>`;
   const reviewHtml = pvReviewCard(snap);
@@ -1860,43 +1860,50 @@ ${vsApproved}
 
 function planGateModal() {
   const m = state.modal;
-  const d = m.detail || state.planVersionDetail || { version: "?", warnings: [] };
+  const d = m.detail;
   const warnings = d.warnings || [];
   if (m.type === "plan-reject")
     return modalShell(t("Reject plan"), t("The draft is rejected and its risks are archived. Nothing is written to the tasks."), "plan-reject",
       field(t("Reason *"), '<textarea name="comment" required minlength="3" maxlength="2000"></textarea>', true), t("Reject plan"));
-  return modalShell(t("Approve plan"), t("Approving writes the snapshot dates to every task and moves the project to active."), "plan-approve",
-    `${warnings.length ? `<div class="callout warning"><b>${t("Warnings to acknowledge")}</b><br>${warnings.map(esc).join("<br>")}</div><label style="display:flex;gap:8px;align-items:center;margin:8px 0"><input type="checkbox" name="ack" required> ${t("I acknowledge these warnings")}</label>` : ""}${field(t("Comment"), '<textarea name="comment" maxlength="2000"></textarea>', true)}`, t("Approve plan"));
+  return modalShell(t("Approve plan"), t("Approving applies the dates from this plan version and moves the project to active."), "plan-approve",
+    `${warnings.length ? `<div class="callout warning"><b>${t("Warnings to acknowledge")}</b><br>${warnings.map(esc).join("<br>")}</div><label style="display:flex;gap:8px;align-items:center;margin:8px 0"><input type="checkbox" name="ack" required> ${t("I acknowledge these warnings")}</label>` : ""}${field(t("Comment"), `<textarea name="comment" maxlength="2000">${esc(m.comment)}</textarea>`, true)}`, t("Approve plan"));
+}
+
+async function queuePlanReview(path, body) {
+  const context = projectContext;
+  const job = await post(`/projects/${context.id}/plan/${path}`, body);
+  if (!isCurrentProject(context)) return;
+  state.planRulesOnly = !!body.rules_only;
+  pollProjectJob(context, "planreview", job);
+  if (state.tab === "planreview" && !state.modal) render();
 }
 
 Object.assign(actions, {
-  "plan-refresh": async () => { await reloadPlanReview(true); await reloadProject(); render(); },
-  "plan-version": async el => { state.planVersionSel = Number(el.dataset.v); await reloadPlanReview(); render(); },
+  "plan-refresh": async () => {
+    const context = projectContext;
+    await Promise.all([reloadPlanReview(true, context), reloadProject(context)]);
+    if (isCurrentProject(context) && state.tab === "planreview" && !state.modal) render();
+  },
+  "plan-version": async el => {
+    const context = projectContext;
+    await reloadPlanReview(false, context, Number(el.dataset.v));
+    if (isCurrentProject(context) && state.tab === "planreview" && !state.modal) render();
+  },
   "plan-generate": async () => {
     if (!confirm(t("Run Agent 3? A new draft plan version is stored and Agent 4 reviews it next. Task dates are written only when you approve the plan."))) return;
-    try {
-      const job = await post(`/projects/${state.project.id}/plan/generate`, {});
-      state.planReviewJob = job; render(); pollPlanReviewJob(job.id);
-    } catch (e) { state.notice = { type: "bad", text: e.message }; render(); }
+    await queuePlanReview("generate", {});
   },
-  "plan-review": async () => {
-    try {
-      const job = await post(`/projects/${state.project.id}/plan/review`, {});
-      state.planReviewJob = job; state.planRulesOnly = false; render(); pollPlanReviewJob(job.id);
-    } catch (e) { state.notice = { type: "bad", text: e.message }; render(); }
-  },
-  "plan-rules-review": async () => {
-    try {
-      const job = await post(`/projects/${state.project.id}/plan/review`, { rules_only: true });
-      state.planReviewJob = job; state.planRulesOnly = true; render(); pollPlanReviewJob(job.id);
-    } catch (e) { state.notice = { type: "bad", text: e.message }; render(); }
-  },
+  "plan-review": () => queuePlanReview("review", {}),
+  "plan-rules-review": () => queuePlanReview("review", { rules_only: true }),
   "plan-open-gate": async () => {
-    try {
-      state.planGate = await post(`/projects/${state.project.id}/plan/versions/${state.planVersionSel}/open-gate`, {});
-      await reloadProject(); await reloadPlanReview();
-      state.notice = { type: "ok", text: t("The approval gate is open — the project is in Plan review.") }; render();
-    } catch (e) { state.notice = { type: "bad", text: e.message }; render(); }
+    const context = projectContext;
+    const version = state.planVersionSel;
+    await post(`/projects/${context.id}/plan/versions/${version}/open-gate`, {});
+    if (!isCurrentProject(context)) return;
+    await Promise.all([reloadProject(context), reloadPlanReview(false, context)]);
+    if (!isCurrentProject(context) || state.tab !== "planreview" || state.modal) return;
+    state.notice = { type: "ok", text: t("The approval gate is open — the project is in Plan review.") };
+    render();
   },
   "plan-approve": () => { state.modal = { type: "plan-approve", detail: state.planVersionDetail }; render(); },
   "plan-reject": () => { state.modal = { type: "plan-reject", detail: state.planVersionDetail }; render(); },
@@ -1904,22 +1911,51 @@ Object.assign(actions, {
 
 Object.assign(submitters, {
   "plan-approve": async form => {
+    const context = projectContext;
+    const modal = state.modal;
+    const { version, warnings, warnings_token } = modal.detail;
     const fd = new FormData(form);
+    const comment = String(fd.get("comment") || "").trim();
+    const body = { comment, acknowledge_warnings: !!fd.get("ack") };
+    if (warnings?.length) body.warnings_token = warnings_token;
+    const currentModal = () => isCurrentProject(context) && state.modal === modal;
+    let res;
     try {
-      const res = await post(`/projects/${state.project.id}/plan/versions/${state.planVersionSel}/approve`, {
-        comment: String(fd.get("comment") || "").trim(),
-        acknowledge_warnings: !!fd.get("ack"),
-      });
-      state.modal = null; await reloadProject(); await reloadPlanReview(); await reloadSchedule();
-      state.notice = { type: "ok", text: t("Plan") + " v" + res.version + " " + t("approved") + " — " + (res.tasks_applied || 0) + " " + t("task date(s) written.") }; render();
-    } catch (e) { showModalError(e.message); }
+      res = await post(`/projects/${context.id}/plan/versions/${version}/approve`, body);
+    } catch (e) {
+      if (!currentModal() || e.message === "unauthorized") return;
+      if (!["warnings_changed", "warnings_not_acknowledged"].includes(e.code)) throw e;
+      const detail = await reloadPlanReview(false, context, version);
+      if (!currentModal()) return;
+      if (!detail || detail.version !== version || detail.status !== "draft") throw e;
+      state.modal = { ...modal, detail, comment };
+      render();
+      showModalError(t("The approval warnings changed. Read the current warnings and submit again."));
+      return;
+    }
+    if (!isCurrentProject(context)) return;
+    if (currentModal()) state.modal = null;
+    let message = t("Plan") + " v" + res.version + " " + t("approved") + " — " + (res.tasks_applied || 0) + " " + t("task date(s) written.");
+    try {
+      await Promise.all([reloadProject(context), reloadPlanReview(false, context), reloadSchedule(context)]);
+    } catch (e) {
+      if (e.message === "unauthorized") return;
+      message = t("The decision was saved. Refresh to load the latest project data.");
+    }
+    if (!isCurrentProject(context) || state.modal) return;
+    state.notice = { type: "ok", text: message };
+    render();
   },
   "plan-reject": async form => {
+    const context = projectContext;
+    const modal = state.modal;
     const fd = new FormData(form);
-    try {
-      await post(`/projects/${state.project.id}/plan/versions/${state.planVersionSel}/reject`, { comment: String(fd.get("comment") || "").trim() });
-      state.modal = null; await reloadProject(); await reloadPlanReview();
-      state.notice = { type: "ok", text: t("Plan rejected. Nothing was written to the tasks.") }; render();
-    } catch (e) { showModalError(e.message); }
+    await post(`/projects/${context.id}/plan/versions/${modal.detail.version}/reject`, { comment: String(fd.get("comment") || "").trim() });
+    if (!isCurrentProject(context)) return;
+    if (state.modal === modal) state.modal = null;
+    await Promise.all([reloadProject(context), reloadPlanReview(false, context)]);
+    if (!isCurrentProject(context) || state.modal) return;
+    state.notice = { type: "ok", text: t("Plan rejected. Nothing was written to the tasks.") };
+    render();
   },
 });

@@ -240,8 +240,9 @@ const AR = {
   "Scope review": "مراجعة النطاق",
   "Work plan": "خطة العمل",
   "Schedule": "الجدولة",
-  "Updates (M7)": "التحديثات (M7)",
-  "Decisions (M8)": "القرارات (M8)",
+  "Updates (next)": "التحديثات (قريبًا)",
+  "Decisions (next)": "القرارات (قريبًا)",
+  "Planned for the next phase": "مخطط للمرحلة القادمة",
   "Team": "الفريق",
   "Sources": "المصادر",
   "Project snapshot": "ملخص المشروع",
@@ -614,8 +615,8 @@ function projectView() {
   const p = state.project;
   const tabs = [["overview", "Overview"], ["sources", "Sources (" + (p.sources || []).length + ")"], ["team", "Team (" + state.team.length + ")"]];
   if (isPM()) tabs.push(["scope", "Scope review"], ["plan", "Work plan"], ["schedule", "Schedule"], ["planreview", "Plan review"], ["changes", "Changes"]);
-  const later = ["Updates (M7)", "Decisions (M8)"];
-  return `<div class="workspace-head"><div class="workspace-title"><div class="project-monogram">${esc((p.name || "P")[0].toUpperCase())}</div><div><h1>${esc(p.name)}</h1><p>${esc(p.goal || "No goal added")}</p></div></div><div style="display:flex;gap:8px;align-items:center">${statusBadge(p.status)}${isPM() ? `<button class="btn btn-secondary btn-small" data-action="export-pdf">⬇ ${t("Export PDF")}</button><button class="btn btn-secondary btn-small" data-action="modal" data-modal="edit-project">${t("Edit project")}</button>` : ""}</div></div><div class="tabs">${tabs.map(t => `<button class="${state.tab === t[0] ? "active" : ""}" data-action="tab" data-tab="${t[0]}">${esc(t[1])}</button>`).join("")}${later.map(l => `<button disabled style="opacity:.45;cursor:not-allowed" title="Not available yet">${esc(l)}</button>`).join("")}</div>${state.tab === "sources" ? sourcesView() : state.tab === "team" ? teamView() : state.tab === "scope" ? scopeView() : state.tab === "plan" ? planView() : state.tab === "schedule" ? scheduleView() : state.tab === "planreview" ? planReviewView() : state.tab === "changes" ? changeView() : overviewView()}`;
+  const later = ["Updates (next)", "Decisions (next)"];
+  return `<div class="workspace-head"><div class="workspace-title"><div class="project-monogram">${esc((p.name || "P")[0].toUpperCase())}</div><div><h1>${esc(p.name)}</h1><p>${esc(p.goal || "No goal added")}</p></div></div><div style="display:flex;gap:8px;align-items:center">${statusBadge(p.status)}${isPM() ? `<button class="btn btn-secondary btn-small" data-action="export-pdf">⬇ ${t("Export PDF")}</button><button class="btn btn-secondary btn-small" data-action="modal" data-modal="edit-project">${t("Edit project")}</button>` : ""}</div></div><div class="tabs">${tabs.map(t => `<button class="${state.tab === t[0] ? "active" : ""}" data-action="tab" data-tab="${t[0]}">${esc(t[1])}</button>`).join("")}${later.map(l => `<button disabled style="opacity:.45;cursor:not-allowed" title="${esc(t("Planned for the next phase"))}">${esc(t(l))}</button>`).join("")}</div>${state.tab === "sources" ? sourcesView() : state.tab === "team" ? teamView() : state.tab === "scope" ? scopeView() : state.tab === "plan" ? planView() : state.tab === "schedule" ? scheduleView() : state.tab === "planreview" ? planReviewView() : state.tab === "changes" ? changeView() : overviewView()}`;
 }
 
 function overviewView() {

@@ -231,6 +231,10 @@ OCR; meeting recording/transcription; automatic external messages; one independe
 
 The Schedule tab presents Agent 3's preview alongside the live Gantt. The legacy decision endpoint returns `410 Gone` for PMs. Existing schedule previews, historical decisions, and published task dates are retained. Version approval checks current planning inputs again and requires acknowledgement of the warnings shown to the PM. Versioning for later manual task changes is tracked separately in PR 1B.
 
+### ADR-026: Manual task changes are published through Plan Review
+
+Accepting a change to an approved plan creates a linked draft version and schedule preview. Plan Review publishes the edited task fields and recalculated schedule in one transaction. The previous plan stays live during review and after rejection. Historical change requests keep their recorded outcomes. Accepted exact date windows carry forward as scheduling constraints.
+
 ## Decision Log
 
 | Date | Decision | Reason |

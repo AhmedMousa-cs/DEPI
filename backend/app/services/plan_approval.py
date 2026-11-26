@@ -14,7 +14,8 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.audit import write_audit
-from app.db.models import Decision, PlanVersion, Project, Risk, Task
+from app.db.models import ChangeRequest, Decision, PlanVersion, Project, Risk, Task
+from app.services.changes import task_change_baseline
 from app.services import plan_versions as pvs
 
 PLAN_STATUS_FOR_REVIEW = "plan_review"
@@ -57,6 +58,11 @@ def approval_warnings(pv: PlanVersion) -> tuple[list[str], str | None]:
     return warnings, token
 
 
+def _linked_change(db: Session, pv: PlanVersion) -> ChangeRequest | None:
+    change_id = pv.snapshot.get("change_request_id")
+    return db.get(ChangeRequest, change_id) if change_id is not None else None
+
+
 def approval_blockers(db: Session, project: Project | None, pv: PlanVersion | None, acknowledge: bool,
                       warnings_token: str | None = None, *, lock_inputs: bool = False) -> dict | None:
     """None = approvable. Otherwise {"code", "message", ...} explaining why not."""
@@ -76,9 +82,21 @@ def approval_blockers(db: Session, project: Project | None, pv: PlanVersion | No
     if not pv.snapshot.get("review"):
         return {"code": "not_reviewed", "message": "Agent 4 has not reviewed this draft yet."}
     inputs = pvs.load_plan_inputs(db, pv.project_id, lock=lock_inputs)
+    is_change_plan = pv.snapshot.get("change_request_id") is not None
     if not pvs.snapshot_matches_inputs(pv.snapshot, inputs):
+        action = "Reject this draft and propose the change again." if is_change_plan else "Rebuild the plan."
         return {"code": "inputs_changed",
-                "message": "The draft no longer matches the project dates, tasks, dependencies or team. Rebuild the plan."}
+                "message": f"The draft no longer matches the project dates, tasks, dependencies or team. {action}"}
+    if is_change_plan:
+        change = _linked_change(db, pv)
+        task = db.get(Task, change.target_task_id) if change is not None and change.target_task_id is not None else None
+        planned = next((t for t in pv.snapshot["tasks"] if task is not None and t["id"] == task.id), None)
+        if (change is None or change.plan_version_id != pv.id or change.project_id != pv.project_id
+                or change.status != "approved" or task is None or task.project_id != pv.project_id
+                or task.review_status != "approved" or task_change_baseline(task) != change.payload["before"]
+                or planned is None or any(planned.get(k) != value for k, value in change.payload["after"].items())):
+            return {"code": "inputs_changed",
+                    "message": "The accepted task change no longer matches this draft. Reject the draft and propose the change again."}
     warnings, current_token = approval_warnings(pv)
     if warnings and not acknowledge:
         return {"code": "warnings_not_acknowledged", "message": "Acknowledge the warnings to approve this plan.",
@@ -117,6 +135,7 @@ def approve_plan(db: Session, *, project_id: int, version: int, decided_by: int,
         return {"written": False, **blocker}
 
     snap = pv.snapshot
+    change = _linked_change(db, pv)
     applied = 0
     for t in snap["tasks"]:
         row = db.get(Task, t["id"])
@@ -125,6 +144,15 @@ def approve_plan(db: Session, *, project_id: int, version: int, decided_by: int,
         row.start, row.end = date.fromisoformat(t["start"]), date.fromisoformat(t["end"])
         row.is_critical = bool(t["is_critical"])
         row.assignee_member_id = t["assignee_member_id"]
+        if change is not None and row.id == change.target_task_id:
+            fields = change.payload["after"]
+            if "title" in fields:
+                row.title = t["title"]
+            if "estimate_hours" in fields:
+                row.estimate_hours = t["estimate_hours"]
+            write_audit(db, actor, "change.published", "change_request", change.id,
+                        before=change.payload["before"],
+                        after={"plan_version": version, "task_id": row.id, "applied": task_change_baseline(row)})
         applied += 1
 
     older = [v.id for v in db.scalars(select(PlanVersion).where(

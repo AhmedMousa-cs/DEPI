@@ -102,6 +102,33 @@ def test_not_before_too_far_rejected():
         compute_dates([T("X", 1, not_before=date(2100, 1, 1))], SUN)
 
 
+def test_fixed_dates_push_dependents_and_limit_upstream_float():
+    tasks = [
+        T("A", 2),
+        T("B", 2, deps=["A"], fixed_start=date(2026, 11, 19)),
+        T("C", 1, deps=["B"]),
+    ]
+    scheduled = by_id(compute_dates(tasks, SUN))
+    assert scheduled["A"].total_float == 2
+    assert (scheduled["B"].start_date, scheduled["B"].end_date) == (date(2026, 11, 19), date(2026, 11, 22))
+    assert scheduled["B"].total_float == 0
+    assert scheduled["C"].start_date == date(2026, 11, 23)
+
+
+def test_fixed_date_cannot_be_shifted_to_fit_dependencies():
+    with pytest.raises(InvalidInputError, match="fixed start.*dependencies"):
+        compute_dates([T("A", 1), T("B", 1, deps=["A"], fixed_start=SUN)], SUN)
+
+
+@pytest.mark.parametrize(("fixed_start", "message"), [
+    (date(2026, 11, 20), "must be a working day"),
+    (date(2026, 11, 12), "before the project start"),
+])
+def test_fixed_start_must_be_on_a_working_day_in_the_project(fixed_start, message):
+    with pytest.raises(InvalidInputError, match=message):
+        compute_dates([T("X", 1, fixed_start=fixed_start)], SUN)
+
+
 def test_zero_duration_milestone_sits_at_end_of_predecessor():
     r = compute_dates([T("A", 3), T("M", 0, deps=["A"]), T("B", 2, deps=["M"])], SUN)
     t = by_id(r)

@@ -21,6 +21,19 @@ Plan Review is the PM decision point for a generated schedule. The retired
 `GET /projects/{id}/scheduling` still serves the preview, and previously published dates and
 historical schedule decisions remain available.
 
+## Publishing manual task changes
+
+In **Changes**, proposing a task edit stores the requested fields and an impact estimate. Accepting
+it creates a new draft version with a recalculated schedule. The existing plan remains published
+while the PM checks the draft's diff and runs Agent 4 or the automatic checks. Approval in Plan
+Review publishes the edit, the recalculated task dates and the risks together. Rejecting the draft
+preserves the published plan. The Changes tab links to the version and shows its publication status.
+
+A requested start or end is an exact working-day constraint. Editing one endpoint keeps the other
+endpoint from the current task. Infeasible ranges and dependencies must be corrected before the
+PM can accept the request. The project has one draft at a time. A draft with an accepted change
+must be approved or rejected before another draft can replace it.
+
 ## Rules enforced in code (each has a test)
 - Agents write **drafts only**. Agent 4 has 7 read tools and 2 write tools (`save_draft_risks`,
   `save_plan_review`); there is no approve/reject tool, and no module under `app/agents` or `app/tools`

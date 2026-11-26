@@ -1,10 +1,17 @@
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
+from fastapi.testclient import TestClient
+from langgraph.checkpoint.postgres import PostgresSaver
+from sqlalchemy import text
+from sqlalchemy.engine import make_url
 
 from app.agents import agent1_extract
+from app.config import settings
 from app.db.models import Requirement, Source
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, engine
+from app.main import app
 from app.orchestrator.checkpoints import postgres_checkpointer
 from app.schemas.extraction import ExtractedRequirement
 from app.services.jobs import process_one
@@ -67,6 +74,35 @@ def test_scope_endpoints_are_pm_only():
     assert client.get(scope(pid, "status"), headers=tl).status_code == 403
     assert client.post(scope(pid, "open"), headers=tl).status_code == 403
     assert client.post(scope(pid, "approve"), json={}, headers=tl).status_code == 403
+
+
+def test_fresh_checkpoint_schema_is_ready_before_first_scope_request(monkeypatch):
+    pm = pm_headers()
+    pid = make_project(pm)["id"]
+    schema = f"fresh_checkpoint_{uuid4().hex}"
+    url = make_url(settings.database_url).update_query_dict({"options": f"-csearch_path={schema}"})
+    with engine.begin() as connection:
+        connection.execute(text(f"CREATE SCHEMA {schema}"))
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(settings, "database_url", url.render_as_string(hide_password=False))
+            with TestClient(app) as started_client:
+                with engine.connect() as connection:
+                    assert connection.scalar(
+                        text("SELECT to_regclass(:index_name)"),
+                        {"index_name": f"{schema}.checkpoints_thread_id_idx"},
+                    ) is not None
+
+                def unexpected_setup(self):
+                    pytest.fail("Checkpoint DDL ran inside a Scope Review request")
+
+                patch.setattr(PostgresSaver, "setup", unexpected_setup)
+                response = started_client.get(scope(pid, "status"), headers=pm)
+                assert response.status_code == 200, response.text
+                assert response.json()["gate"] == "not_started"
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text(f"DROP SCHEMA {schema} CASCADE"))
 
 
 def test_open_needs_requirements_then_waits_and_is_idempotent():

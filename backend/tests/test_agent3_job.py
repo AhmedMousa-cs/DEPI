@@ -234,6 +234,7 @@ def test_rejecting_the_reviewed_plan_leaves_schedule_dates_unchanged(monkeypatch
     r = client.post(decision_url, json={"comment": "conflicts first"}, headers=pm)
     assert r.status_code == 200 and r.json()["status"] == "rejected"
     assert approve_plan(pm, pid, plan).status_code == 409
+    assert client.get(f"/projects/{pid}/scheduling", headers=pm).status_code == 404
     rows = client.get(f"/projects/{pid}/tasks", headers=pm).json()
     assert all(t["start"] is None and t["end"] is None for t in rows)
 

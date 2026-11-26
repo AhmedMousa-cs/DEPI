@@ -93,13 +93,16 @@ def complete_run(run_id: int, *, input_tokens: int, output_tokens: int, cost: De
     return True
 
 
-def fail_run(run_id: int, *, error_code: str, error: str, latency_ms: int | None, trace_id: str | None) -> bool:
+def fail_run(run_id: int, *, error_code: str, error: str, latency_ms: int | None, trace_id: str | None,
+             input_tokens: int = 0, output_tokens: int = 0, cost: Decimal = Decimal(0)) -> bool:
     with SessionLocal() as db:
         run = db.get(AgentRun, run_id, with_for_update=True)
         if run is None or run.status != "running":
             return False
         run.status, run.error_code, run.error = "failed", error_code, error[:500]
         run.latency_ms, run.trace_id = latency_ms, trace_id
+        run.input_tokens, run.output_tokens = input_tokens, output_tokens
+        run.total_tokens, run.cost_usd = input_tokens + output_tokens, cost
         run.reserved_tokens, run.reserved_cost_usd, run.finished_at = 0, Decimal(0), utcnow()
         write_audit(db, _actor(run.agent), "agent.run.failed", "agent_run", run.id,
                     after={"project_id": run.project_id, "error_code": error_code, "error": error[:200]})

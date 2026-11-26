@@ -196,11 +196,18 @@ def approve(project_id: int, version: int, body: ApproveBody | None = None, db: 
 @router.post("/versions/{version}/reject")
 def reject(project_id: int, version: int, body: RejectBody, db: Session = Depends(get_db), user: User = PM):
     get_project_or_404(db, project_id)
-    _version_or_404(db, project_id, version)
+    pv = _version_or_404(db, project_id, version)
+    unreviewed_change = (pv.status == "draft" and pv.snapshot.get("change_request_id") is not None
+                         and not pv.snapshot.get("review"))
     db.close()
     try:
         with postgres_checkpointer() as saver:
-            state = PlanGate(saver).reject(project_id, version, user.id, body.comment)
+            gate = PlanGate(saver)
+            if unreviewed_change:
+                gate.open(project_id, version, for_rejection=True)
+            state = gate.reject(project_id, version, user.id, body.comment)
+    except PlanGateNotAllowed as exc:
+        raise HTTPException(409, str(exc)) from exc
     except PlanGateNotWaiting:
         raise HTTPException(409, "The approval gate is not open for this version. Open it first.")
     result = state.get("result") or {}

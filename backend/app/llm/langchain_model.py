@@ -9,6 +9,8 @@ from __future__ import annotations
 from app.config import settings
 from app.llm.errors import LLMConfigurationError
 
+GROQ_GPT_OSS_MODELS = {"openai/gpt-oss-120b", "openai/gpt-oss-20b"}
+
 
 def get_langchain_model(model_name: str | None = None):
     provider = (settings.llm_provider or "").lower()
@@ -21,8 +23,12 @@ def get_langchain_model(model_name: str | None = None):
             raise LLMConfigurationError("GROQ_API_KEY is not set")
         from langchain_openai import ChatOpenAI
 
+        gpt_oss_options = (
+            {"reasoning_effort": "low", "max_completion_tokens": min(settings.llm_max_output_tokens, 1600)}
+            if model_id in GROQ_GPT_OSS_MODELS else {}
+        )
         return ChatOpenAI(model=model_id, api_key=settings.groq_api_key, base_url=settings.llm_base_url,
-                          temperature=0, timeout=timeout, max_retries=retries)
+                          temperature=0, timeout=timeout, max_retries=retries, **gpt_oss_options)
     if provider == "anthropic":
         if not settings.anthropic_api_key:
             raise LLMConfigurationError("ANTHROPIC_API_KEY is not set")

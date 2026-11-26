@@ -21,11 +21,23 @@ def memory_checkpointer():
 
 
 @contextmanager
-def postgres_checkpointer(database_url: str | None = None, *, setup: bool = True) -> Iterator:
+def postgres_checkpointer(database_url: str | None = None, *, setup: bool = False) -> Iterator:
     from langgraph.checkpoint.postgres import PostgresSaver
 
     conninfo = to_conninfo(database_url or settings.database_url)
     with PostgresSaver.from_conn_string(conninfo) as saver:
         if setup:
-            saver.setup()  # idempotent: creates the checkpoint tables if missing
+            # API and worker processes can start together. Serialize the version check and DDL.
+            lock = "hashtextextended('nexus.checkpoint_schema', 0)"
+            saver.conn.execute(f"SELECT pg_advisory_lock({lock})")
+            try:
+                saver.setup()
+            finally:
+                saver.conn.execute(f"SELECT pg_advisory_unlock({lock})")
         yield saver
+
+
+def initialize_postgres_checkpoints() -> None:
+    """Run schema setup before opening any request or worker transactions."""
+    with postgres_checkpointer(setup=True):
+        pass

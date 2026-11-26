@@ -368,6 +368,7 @@ const AR = {
   "Export PDF": "تصدير PDF",
   "Building the PDF report…": "جارٍ إنشاء تقرير PDF…",
   "PDF report downloaded.": "تم تنزيل تقرير PDF.",
+  "No PDF was received. Try exporting again.": "لم يتم استلام تقرير PDF. حاول التصدير مرة أخرى.",
   "PDF export failed:": "فشل تصدير PDF:",
   "Progress saved:": "تم حفظ التقدم:",
   "Changes": "التغييرات",
@@ -645,13 +646,17 @@ function pfRisks() {
   const pf = pfState();
   if (!pf.risks) return pfLoading("Loading the risk register…");
   const s = pf.risks.summary;
-  const groups = [["high", "High severity", "high"], ["medium", "Medium severity", "medium"], ["low", "Low severity", "low"]];
+  const groups = [["critical", "Critical", "high", "var(--red)"], ["high", "High severity", "high", "var(--orange)"], ["medium", "Medium severity", "medium", "var(--blue)"], ["low", "Low severity", "low", "var(--green)"]];
   const sections = groups.map(([sev, label, cls]) => {
     const rows = pf.risks.risks.filter(r => r.severity === sev);
     if (!rows.length) return "";
     return `<h2 style="margin:6px 0 10px">${esc(label)} <span class="pf-count ${cls}">${rows.length}</span></h2><div class="project-list">${rows.map(r => `<div class="pf-card risk-${cls}"><div style="display:flex;gap:12px;align-items:flex-start;flex:1"><div style="font-size:18px;line-height:1.4">${PF_RISK_ICON[r.type] || "⚠️"}</div><div style="flex:1;min-width:0"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="project-title">${esc(r.project_name)}</span><span class="badge ${cls === "high" ? "red" : cls === "medium" ? "blue" : "green"}">${esc(r.type)}</span></div><div class="project-sub">${esc(r.message)}</div><div class="row-meta"><span class="subtle">→ ${esc(r.suggestion)}</span></div></div></div>${r.project_id ? `<button class="btn btn-secondary btn-small" data-action="open-project" data-id="${r.project_id}">Open →</button>` : ""}</div>`).join("")}</div>`;
   }).join("");
-  const chart = pf.risks.risks.length ? `<div class="pf-grid2"><div class="pf-chart-card"><h3>${t("Risks by type")}</h3>${pfBars(["schedule", "pipeline", "scope", "resource"].map(ty => ({ name: t(ty), value: pf.risks.risks.filter(r => r.type === ty).length, color: ty === "schedule" ? "var(--red)" : ty === "resource" ? "var(--orange)" : "var(--blue)", suffix: String(pf.risks.risks.filter(r => r.type === ty).length) })).filter(r => r.value > 0))}</div><div class="pf-chart-card"><h3>${t("Open risks")}</h3><div class="pf-donut-wrap">${pfDonut([{ value: s.high, color: "var(--red)" }, { value: s.medium, color: "var(--blue)" }, { value: s.low, color: "var(--green)" }])}${pfLegend([{ label: t("High severity"), value: s.high, color: "var(--red)" }, { label: t("Medium severity"), value: s.medium, color: "var(--blue)" }, { label: t("Low severity"), value: s.low, color: "var(--green)" }])}</div></div></div>` : "";
+  const severityStats = groups.map(([severity, label, , color]) => ({ label: t(label), value: s[severity] || 0, color }));
+  const chart = pf.risks.risks.length ? `<div class="pf-grid2"><div class="pf-chart-card"><h3>${t("Risks by type")}</h3>${pfBars(["plan", "schedule", "pipeline", "scope", "resource"].map(type => {
+    const value = pf.risks.risks.filter(r => r.type === type).length;
+    return { name: t(type), value, color: type === "schedule" ? "var(--red)" : type === "resource" ? "var(--orange)" : "var(--blue)", suffix: String(value) };
+  }).filter(bar => bar.value > 0))}</div><div class="pf-chart-card"><h3>${t("Open risks")}</h3><div class="pf-donut-wrap">${pfDonut(severityStats)}${pfLegend(severityStats)}</div></div></div>` : "";
   return `<div class="pf-chips">${pfChip(s.total, t("Open risks"), s.total ? "warn" : "ok")}${pfChip(s.high, t("High severity"), s.high ? "bad" : "ok")}${pfChip(s.medium, t("Medium severity"), "")}</div>${chart}${sections || `<div class="empty"><div class="empty-icon">🎉</div><h3>${t("No risks detected")}</h3><p>${t("Everything is on track — keep it that way.")}</p></div>`}`;
 }
 
@@ -973,6 +978,9 @@ async function downloadReport() {
   const res = await apiFetch(`/projects/${state.project.id}/report.pdf`); // raw Response (not JSON)
   if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
   const blob = await res.blob();
+  if (!blob.size || blob.type.split(";")[0] !== "application/pdf") {
+    throw new Error(t("No PDF was received. Try exporting again."));
+  }
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = `nexus-report-${state.project.id}-${new Date().toISOString().slice(0, 10)}.pdf`;
@@ -1618,6 +1626,7 @@ function scheduleView() {
   const conflicts = p.conflicts || [];
   const capacity = p.capacity || { members: [], total_available_hours: 0, total_assigned_hours: 0 };
   const explanation = p.explanation || {};
+  const planVersion = d.plan_version == null ? "" : ` <span class="subtle">v${esc(d.plan_version)}</span> ${pvBadge(d.review_status)}`;
 
   const chain = (schedule.critical_path || []).map(id => esc(titles[id] || id)).join(' <span class="subtle">→</span> ');
   const taskRows = schedule.tasks.map(t => scheduleTaskRow(t, titles)).join("");
@@ -1628,19 +1637,26 @@ function scheduleView() {
     return `<div class="project-row"><div><div class="project-title">${esc(m.name || m.member_id)} ${m.is_overloaded ? '<span class="badge" style="background:#fde8e8;color:#b00020">Overloaded</span>' : ""}</div><div class="row-meta"><span class="badge">${esc(m.hours_per_day)} h/day</span><span class="badge">Utilization ${esc(util)}</span><span class="subtle">${avail}</span><span class="subtle">${esc(Math.round(Number(m.assigned_hours)))} h assigned</span></div></div></div>`;
   }).join("");
   const estimateRows = (p.estimates || []).map(e => {
-    const hours = state.tasks.find(x => String(x.id) === String(e.task_id));
-    return `<div class="project-row"><div><div class="project-title">${esc(titles[e.task_id] || "Task #" + e.task_id)} ${estimateBadge(e.source)}</div><div class="row-meta"><span class="badge">${esc(e.duration_days)} working day${e.duration_days === 1 ? "" : "s"}</span>${hours ? `<span class="subtle">${esc(hours.estimate_hours)} h estimate</span>` : ""}${e.rationale ? `<span class="subtle">Why: ${esc(e.rationale)}</span>` : ""}</div></div></div>`;
+    const planned = schedule.tasks.find(task => String(task.id) === String(e.task_id));
+    const hours = planned && "estimate_hours" in planned ? planned.estimate_hours
+      : state.tasks.find(task => String(task.id) === String(e.task_id))?.estimate_hours;
+    return `<div class="project-row"><div><div class="project-title">${esc(titles[e.task_id] || "Task #" + e.task_id)} ${estimateBadge(e.source)}</div><div class="row-meta"><span class="badge">${esc(e.duration_days)} working day${e.duration_days === 1 ? "" : "s"}</span>${hours != null ? `<span class="subtle">${esc(hours)} h estimate</span>` : ""}${e.rationale ? `<span class="subtle">Why: ${esc(e.rationale)}</span>` : ""}</div></div></div>`;
   }).join("");
   const explainLines = [explanation.summary, explanation.critical_path].filter(Boolean).map(x => `<p style="margin:6px 0">${esc(x)}</p>`).join("");
   const explainList = (explanation.conflicts || []).concat(explanation.estimates || []).map(x => `<li>${esc(x)}</li>`).join("");
   const explainSource = explanation.source === "template" ? '<span class="badge">Template wording</span>' : explanation.source === "llm" ? '<span class="badge blue">LLM wording</span>' : "";
+  const explainIntro = p.change_request_id != null
+    ? "The schedule explanation uses the dates and resource calculations for this change request."
+    : explanation.source === "template"
+      ? "Deterministic template (the LLM was unavailable)."
+      : "Written by the LLM from numbers the code computed.";
 
   return `${head}${jobLine}${liveGantt}
 <div class="grid two-col">
-  <section class="card section-card"><h2>Agent 3 schedule preview</h2><p class="section-intro">The preview uses the critical path method with a Friday–Saturday weekend.</p>
+  <section class="card section-card"><h2>Agent 3 schedule preview${planVersion}</h2><p class="section-intro">The preview uses the critical path method with a Friday–Saturday weekend.</p>
     <div class="keyvals">${kv("Project start", fmtDate(schedule.project_start))}${kv("Project end", fmtDate(schedule.project_end))}${kv("Total duration", schedule.total_duration_days + " working days")}${kv("Tasks scheduled", String(schedule.tasks.length))}${kv("Conflicts", String(conflicts.length))}</div>
   </section>
-  <section class="card section-card"><h2>Why this schedule ${explainSource}</h2><p class="section-intro">${explanation.source === "template" ? "Deterministic template (the LLM was unavailable)." : "Written by the LLM from numbers the code computed — it cannot change them."}</p>
+  <section class="card section-card"><h2>Why this schedule ${explainSource}</h2><p class="section-intro">${esc(explainIntro)}</p>
     ${explainLines || '<p class="subtle">No explanation stored.</p>'}${explainList ? `<ul style="margin:8px 0 0 18px;font-size:13px">${explainList}</ul>` : ""}
     <p class="subtle" style="margin-top:10px">${t("Preview generated")} ${esc(fmtDateTime(d.created_at))}</p>
   </section>
@@ -1738,7 +1754,8 @@ async function reloadPlanReview(preferDraft = false, context = projectContext, s
   if (!current()) return null;
   const draft = versions.find(v => v.status === "draft");
   if ((preferDraft && draft) || !versions.some(v => v.version === selectedVersion)) {
-    selectedVersion = draft?.version ?? versions[0]?.version ?? null;
+    const approved = versions.find(v => v.status === "approved");
+    selectedVersion = draft?.version ?? approved?.version ?? versions.at(-1)?.version ?? null;
   }
   const [detail, gate, health] = selectedVersion === null ? [null, null, null] : await Promise.all([
     api(`/projects/${id}/plan/versions/${selectedVersion}`).catch(e => { if (e.message === "unauthorized") throw e; return null; }),
@@ -1881,10 +1898,13 @@ function planReviewView() {
     rejected: changePlan ? "The change draft was rejected. Delivery continues on the current plan." : "This version was rejected. Nothing was written to the tasks.",
     superseded: "A newer version replaced this plan.",
   };
+  const canDiscardUnreviewedChange = changePlan && draft && !reviewed && openable;
   const gateActions = !draft
     ? `<div class="callout">${t(closedNotes[d.status] || PV_LABEL[d.status])}</div>`
+    : canDiscardUnreviewedChange
+      ? `<div class="item-actions" style="margin-top:12px"><button class="btn btn-secondary" data-action="plan-reject">${t("Reject plan")}</button></div><p class="subtle" style="margin-top:6px">${t("Agent 4 has not reviewed this draft yet. Run the review before opening the gate.")}</p>`
     : `<div class="item-actions" style="margin-top:12px;flex-wrap:wrap">${gateState === "waiting_for_pm"
-        ? `<button class="btn btn-primary" data-action="plan-approve">${t("Approve plan")}</button><button class="btn btn-secondary" data-action="plan-reject">${t("Reject plan")}</button>`
+        ? `<button class="btn btn-primary" data-action="plan-approve"${running ? " disabled" : ""}>${t("Approve plan")}</button><button class="btn btn-secondary" data-action="plan-reject">${t("Reject plan")}</button>`
         : `<button class="btn btn-primary" data-action="plan-open-gate"${openable ? "" : " disabled"}>${t("Open approval gate")}</button>`}</div>
       <p class="subtle" style="margin-top:6px">${gateState === "waiting_for_pm" ? t(changePlan ? "Approval publishes the proposed task edits and the dates from this version. Rejection closes the draft and archives its risks." : "The gate is open. Approval applies the planned dates and activates the project. Rejection archives the draft risks.") : t("Opening the gate moves the project to Plan review and waits for your decision.")}</p>`;
 

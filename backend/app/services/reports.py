@@ -9,6 +9,7 @@ import io
 import re
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 import arabic_reshaper
 from bidi.algorithm import get_display
@@ -63,7 +64,7 @@ def _p(text, size=9, color=C_INK, bold=False, align=None) -> Paragraph:
         "cell", fontName="Amiri-Bold" if bold else "Amiri", fontSize=size,
         leading=size * 1.4, textColor=color, alignment=align or 0,
     )
-    return Paragraph(_fix(text), style)
+    return Paragraph(escape(_fix(text)), style)
 
 
 def _gantt_span_days(min_d: date, max_d: date) -> int:
@@ -182,7 +183,7 @@ def build_project_pdf(db: Session, project, user) -> bytes:
     summary = [
         [_p("Health", bold=True), _p(card["health"]),
          _p("Progress (hours-weighted)", bold=True), _p(f"{card['progress_pct']}%")],
-        [_p("Execution window", bold=True), _p(f"{ws or '—'} → {we or '—'}"),
+        [_p("Execution window", bold=True), _p(f"{ws} to {we}" if ws and we else "—"),
          _p("Next deadline", bold=True), _p(str(card.get("next_deadline") or "—"))],
         [_p("Approved tasks", bold=True), _p(str(card["tasks"]["approved"])),
          _p("Done", bold=True), _p(str(card["tasks"]["done"]))],

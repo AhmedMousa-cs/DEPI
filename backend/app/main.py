@@ -1,4 +1,7 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.auth import router as auth_router
@@ -16,8 +19,16 @@ from app.api.scope import router as scope_router
 from app.api.sources import router as sources_router
 from app.api.team import router as team_router
 from app.api.users import router as users_router
+from app.orchestrator.checkpoints import initialize_postgres_checkpoints
 
-app = FastAPI(title="NEXUS")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    await run_in_threadpool(initialize_postgres_checkpoints)
+    yield
+
+
+app = FastAPI(title="NEXUS", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5500", "http://127.0.0.1:5500"],

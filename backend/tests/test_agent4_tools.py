@@ -164,3 +164,72 @@ def test_invalid_verdict_is_rejected_before_saving():
     store = InMemoryPlanStore(sample_snapshot())
     out = run_tool("save_plan_review", {"verdict": "approved", "summary": "sneaky"}, store=store)
     assert store.reviews == [] and "error" in out and "ready" in out["error"]
+
+
+def _review_tool_steps(store, steps, *, bundled_reads):
+    from langchain.agents import create_agent
+    from langchain_core.messages import HumanMessage
+
+    from app.agents.agent4_testing import ScriptedChatModel, final_msg, tool_msg
+    from app.tools.plan_tools import Agent4Context
+
+    context = Agent4Context(project_id=1, plan_version_id=1)
+    model = ScriptedChatModel(script=[tool_msg(*step) for step in steps] + [final_msg()])
+    agent = create_agent(model, tools=build_plan_tools(store, bundled_reads=bundled_reads),
+                         context_schema=Agent4Context)
+    result = agent.invoke({"messages": [HumanMessage("Review the change.")]}, context=context)
+    replies = [(message.name, json.loads(message.content)) for message in result["messages"] if message.type == "tool"]
+    return context, replies
+
+
+def test_bundled_evidence_carries_open_risks_and_the_approved_diff_within_payload_budget():
+    approved = sample_snapshot()
+    successor = sample_snapshot()
+    successor["change_request_id"] = 3
+    successor["tasks"][0]["estimate_hours"] = 20
+    successor["tasks"].extend({
+        **successor["tasks"][0], "id": task_id, "title": "مهمة مراجعة " * 30,
+    } for task_id in range(100, 150))
+    source = {"project": {"name": "Clinic Booking", "goal": "تطوير المشروع " * 70},
+              "brief_untrusted": ["المواصفات المعتمدة " * 500], "injection_flags": []}
+    open_risk = {"id": 99, "title": "Downstream handoff", "severity": "high", "likelihood": "medium"}
+    store = InMemoryPlanStore(successor, approved_snapshot=approved, brief=source, approved_risks=[open_risk])
+    _, [(_, payload)] = _review_tool_steps(store, [(("get_review_evidence", {}),)], bundled_reads=True)
+    assert set(payload) == set(READ_TOOL_NAMES)
+    assert payload["get_open_risks"]["approved_plan_risks"]["items"] == [[99, "Downstream handoff", "high", "medium"]]
+    diff = payload["get_plan_diff"]
+    assert diff["against_version"] == 1
+    assert ["task", "changed", 11, "estimate_hours", 16, 20, None] in diff["changes"]["items"]
+    tasks = payload["get_tasks_and_dependencies"]
+    assert tasks["total"] == 54 and tasks["truncated"] and tasks["items"][0][0] == 11
+    assert len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) < 9000
+
+
+def test_bundled_review_waits_for_evidence_then_stages_the_verdict_without_writing():
+    store = InMemoryPlanStore(sample_snapshot())
+    save = ("save_plan_review", {"verdict": "ready", "summary": "Evidence reviewed."})
+    context, replies = _review_tool_steps(store, [
+        (("get_review_evidence", {}), save),
+        (save,),
+    ], bundled_reads=True)
+    first, second = [reply for name, reply in replies if name == "save_plan_review"]
+    assert not first["saved"] and "prior tool turn" in first["errors"][0]
+    assert second["saved"] is True and context.pending_review.verdict == "ready"
+    assert store.reviews == []
+
+
+def test_separate_change_tools_require_open_risks_and_the_approved_diff():
+    approved = sample_snapshot()
+    successor = sample_snapshot()
+    successor["change_request_id"] = 3
+    store = InMemoryPlanStore(successor, approved_snapshot=approved)
+    save = ("save_draft_risks", {"risks": []})
+    _, replies = _review_tool_steps(store, [
+        (("get_plan_diff", {"against": "previous"}),),
+        (save,),
+        (("get_open_risks", {}), ("get_plan_diff", {"against": "approved"})),
+        (save,),
+    ], bundled_reads=False)
+    first, second = [reply for name, reply in replies if name == "save_draft_risks"]
+    assert "get_open_risks" in first["errors"][0] and 'get_plan_diff(against="approved")' in first["errors"][0]
+    assert second["risk_ids"] == [] and "errors" not in second

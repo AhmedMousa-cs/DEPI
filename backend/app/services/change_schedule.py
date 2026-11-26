@@ -4,27 +4,81 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date, timedelta
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.agent3_schedule import Agent3Output, run_agent3
-from app.db.models import Task
+from app.db.models import ChangeRequest, Task
 from app.schemas.scheduling import EGYPT_CALENDAR, TaskInput, TeamMemberInput
 from app.services.plan_versions import PlanInputs, build_snapshot, current_approved, load_plan_inputs
 from app.tools.compute_dates import MAX_HORIZON_DAYS
 from app.tools.scheduling_errors import InvalidInputError
 
 
-def schedule_constraints(baseline: dict, task_ids: set[int], requested: list[dict] | None = None
-                         ) -> tuple[dict[int, dict], dict[int, dict]]:
+def effective_schedule_start(inputs: PlanInputs, baseline: dict, requested: str | None = None) -> date:
+    configured = inputs.project["start_date"]
+    start = requested or configured
+    if requested is None and baseline and baseline.get("project", {}).get("start_date") == configured:
+        start = baseline["schedule"]["project_start"]
+    return date.fromisoformat(start) if start else date.today()
+
+
+def _legacy_date_windows(db: Session, project_id: int, baseline: dict, task_ids: set[int]) -> dict[int, dict]:
+    if not baseline or not task_ids:
+        return {}
+    # Legacy approvals changed Task dates directly. History only establishes which live
+    # endpoints were manually edited. It never supplies dates to the new schedule.
+    latest_edits: dict[int, dict] = {}
+    changes = db.execute(
+        select(ChangeRequest.target_task_id, ChangeRequest.payload)
+        .where(ChangeRequest.project_id == project_id, ChangeRequest.status == "approved",
+               ChangeRequest.plan_version_id.is_(None), ChangeRequest.target_task_id.in_(task_ids))
+        .order_by(ChangeRequest.reviewed_at.desc().nulls_last(), ChangeRequest.id.desc())
+    )
+    for task_id, payload in changes:
+        after = payload.get("after", {})
+        for endpoint in ("start", "end"):
+            if endpoint in after:
+                latest_edits.setdefault(task_id, {}).setdefault(endpoint, after[endpoint])
+    if not latest_edits:
+        return {}
+
+    planned = {row["id"]: row for row in baseline.get("tasks", [])}
+    windows = {}
+    tasks = db.scalars(select(Task).where(Task.project_id == project_id, Task.review_status == "approved",
+                                          Task.id.in_(latest_edits)))
+    for task in tasks:
+        start = task.start.isoformat() if task.start else None
+        end = task.end.isoformat() if task.end else None
+        dates = {"start": start, "end": end}
+        prior = planned.get(task.id, {})
+        if any(dates[key] and dates[key] == value and dates[key] != prior.get(key)
+               for key, value in latest_edits[task.id].items()):
+            if start is None or end is None:
+                raise InvalidInputError(f"Task {task.id}: set both dates to keep its published legacy date change")
+            windows[task.id] = {"task_id": task.id, **dates}
+    return windows
+
+
+def schedule_constraints(
+    db: Session, project_id: int, baseline: dict, task_ids: set[int], requested: list[dict] | None = None,
+    *, replace_window_for: int | None = None,
+) -> tuple[dict[int, dict], dict[int, dict]]:
     """Carry forward published durations and exact date windows for still-approved tasks."""
     overrides = {
         row["task_id"]: {"task_id": row["task_id"], "duration_days": row["duration_days"]}
         for row in baseline.get("overrides", [])
         if row["task_id"] in task_ids and row.get("duration_days") is not None
     }
+    fixed_dates = {row["task_id"]: dict(row) for row in baseline.get("fixed_dates", []) if row["task_id"] in task_ids}
+    legacy_ids = task_ids.difference(fixed_dates, {replace_window_for})
+    legacy_dates = _legacy_date_windows(db, project_id, baseline, legacy_ids)
+    for task_id in legacy_dates:
+        # A published manual date window took precedence over earlier what-if durations.
+        overrides.pop(task_id, None)
+    fixed_dates.update(legacy_dates)
     for row in requested or []:
         overrides.setdefault(row["task_id"], {}).update(row)
-    fixed_dates = {row["task_id"]: dict(row) for row in baseline.get("fixed_dates", []) if row["task_id"] in task_ids}
     return overrides, fixed_dates
 
 
@@ -80,8 +134,11 @@ def build_change_snapshot(db: Session, project_id: int, task_id: int, after: dic
         raise InvalidInputError("The assignee must be a member of this project's team")
 
     baseline = published.snapshot
-    overrides, fixed_dates = schedule_constraints(baseline, task_ids)
-    if "start" in after or "end" in after:
+    changes_window = "start" in after or "end" in after
+    overrides, fixed_dates = schedule_constraints(
+        db, project_id, baseline, task_ids, replace_window_for=task_id if changes_window else None,
+    )
+    if changes_window:
         task = db.get(Task, task_id)
         start = after.get("start", task.start.isoformat() if task.start else None)
         end = after.get("end", task.end.isoformat() if task.end else None)
@@ -95,7 +152,7 @@ def build_change_snapshot(db: Session, project_id: int, task_id: int, after: dic
                        if field in after}
     proposed_tasks = [row | proposed_fields if row["id"] == task_id else row for row in inputs.tasks]
     tasks, members = build_schedule_inputs(replace(inputs, tasks=proposed_tasks), overrides, fixed_dates)
-    project_start = date.fromisoformat(baseline["schedule"]["project_start"])
+    project_start = effective_schedule_start(inputs, baseline)
     output = run_agent3(tasks, members, project_start, calendar=EGYPT_CALENDAR)
     snapshot = build_snapshot(inputs=inputs, output=output, overrides=[overrides[key] for key in sorted(overrides)])
     snapshot["fixed_dates"] = [fixed_dates[key] for key in sorted(fixed_dates)]

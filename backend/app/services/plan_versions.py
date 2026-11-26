@@ -26,6 +26,8 @@ from app.schemas.plan import PlanReviewDraft, RiskDraft
 SNAPSHOT_SCHEMA = 1
 INPUTS_FINGERPRINT_VERSION = 2
 TASK_DIFF_FIELDS = (
+    ("title", "Title"),
+    ("estimate_hours", "Estimate (hours)"),
     ("duration_days", "Duration (working days)"),
     ("start", "Start"),
     ("end", "End"),
@@ -37,6 +39,12 @@ TASK_DIFF_FIELDS = (
 
 class PlanVersionError(ValueError):
     pass
+
+
+class PendingChangeDraft(PlanVersionError):
+    def __init__(self, version: int):
+        self.version = version
+        super().__init__(f"Approve or reject plan v{version} in Plan Review before creating another draft.")
 
 
 class RiskValidationError(PlanVersionError):
@@ -358,6 +366,13 @@ def _require_draft(pv: PlanVersion) -> None:
         raise PlanVersionError(f"plan version {pv.version} is '{pv.status}'; only a draft can be changed")
 
 
+def ensure_can_replace_draft(db: Session, project_id: int) -> PlanVersion | None:
+    draft = current_draft(db, project_id)
+    if draft is not None and draft.snapshot.get("change_request_id") is not None:
+        raise PendingChangeDraft(draft.version)
+    return draft
+
+
 def create_draft_version(
     db: Session, *, project_id: int, snapshot: dict, created_by: str, run_id: int | None = None
 ) -> PlanVersion:
@@ -366,7 +381,7 @@ def create_draft_version(
     if project is None:
         raise PlanVersionError("project not found")
     prev = latest_version(db, project_id)
-    old_draft = current_draft(db, project_id)
+    old_draft = ensure_can_replace_draft(db, project_id)
     if old_draft is not None:
         old_draft.status = "superseded"
         db.execute(

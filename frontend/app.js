@@ -116,7 +116,6 @@ const AR = {
   "Run Agent 3 first - there is no draft to review.": "شغّل Agent 3 الأول — مفيش مسودة تراجعها.",
   "Only a draft can be reviewed. This version is": "المسودة بس هي اللي تتراجع. النسخة دي",
   "Ask Agent 4 to review the current draft again; it replaces the stored review.": "اطلب من Agent 4 يراجع المسودة الحالية تاني؛ المراجعة القديمة بتتستبدل.",
-  "Run Agent 3 again to create a new draft if you want another review.": "شغّل Agent 3 مرة أخرى لعمل مسودة جديدة لو عايز مراجعة تانية.",
   "Review with Agent 4": "مراجعة بواسطة Agent 4",
   "Working...": "جارٍ العمل...",
   "No plan versions yet": "لا توجد نُسخ خطة بعد",
@@ -374,26 +373,47 @@ const AR = {
   "Changes": "التغييرات",
   "Change…": "تغيير…",
   "Propose a change": "اقتراح تغيير",
-  "The task is approved — your edit becomes a tracked change request with a computed impact.": "المهمة معتمدة — تعديلك يصبح طلب تغيير مُتتبَّع مع تحليل أثر محسوب بالكود.",
+  "Propose edits to this approved task and review their impact. Accepting the proposal creates a draft plan for approval.": "اقترح تعديلات على هذه المهمة المعتمدة وراجع أثرها. قبول المقترح ينشئ مسودة خطة للاعتماد.",
   "Estimate (h)": "التقدير (ساعة)",
   "Assignee": "المسؤول",
   "Why this change *": "سبب التغيير *",
   "Propose with impact analysis": "اقتراح مع تحليل الأثر",
-  "Open change requests": "طلبات تغيير مفتوحة",
+  "Proposed changes": "تغييرات مقترحة",
+  "Awaiting plan approval": "بانتظار اعتماد الخطة",
   "High impact": "أثر عالٍ",
   "Medium impact": "أثر متوسط",
   "Low impact": "أثر منخفض",
   "Applied": "مطبَّق",
   "No change requests": "لا طلبات تغيير",
-  "Approved tasks are locked. Propose a change from the Work plan — the impact is computed before you decide.": "المهام المعتمدة مقفلة. اقترح تغييرًا من خطة العمل — الأثر يُحسب قبل قرارك.",
-  "Approve & apply": "اعتماد وتطبيق",
+  "Propose a task change from the Work plan to see its impact.": "اقترح تغييرًا لمهمة من خطة العمل للاطلاع على أثره.",
+  "Accept a proposal to create a draft plan. Approve the draft in Plan review to publish the changes.": "اقبل المقترح لإنشاء مسودة خطة. اعتمد المسودة من شاشة مراجعة الخطة لنشر التغييرات.",
+  "Accept proposal": "قبول المقترح",
+  "Reject proposal": "رفض المقترح",
+  "Accept this proposal and create a draft plan for review?": "هل تريد قبول هذا المقترح وإنشاء مسودة خطة للمراجعة؟",
+  "Reject this change proposal?": "هل تريد رفض مقترح التغيير هذا؟",
+  "Proposed": "مقترح",
+  "Proposal rejected": "رُفض المقترح",
+  "Change request": "طلب تغيير",
+  "Decided": "تاريخ القرار",
+  "Change request submitted. Review the impact before accepting the proposal.": "تم تقديم طلب التغيير. راجع الأثر قبل قبول المقترح.",
+  "Proposal accepted. Review the draft plan to publish the change. The current plan stays live in the meantime.": "تم قبول المقترح. راجع مسودة الخطة لنشر التغيير. تظل الخطة الحالية سارية في هذه الأثناء.",
+  "The proposal is accepted. The current plan stays live while this version awaits approval.": "تم قبول المقترح. تظل الخطة الحالية سارية بينما تنتظر هذه النسخة الاعتماد.",
+  "Published": "منشور",
+  "Draft plan rejected": "رُفضت مسودة الخطة",
+  "Draft plan superseded": "استُبدلت مسودة الخطة",
+  "Source change request": "طلب التغيير المرتبط",
+  "Review the proposed task edits and their schedule impact. Approve the plan to publish both.": "راجع تعديلات المهمة المقترحة وأثرها على الجدولة. اعتمد الخطة لنشرهما.",
+  "Choose whether to publish this change.": "قرّر ما إذا كنت تريد نشر هذا التغيير.",
+  "Approval publishes the proposed task edits and the dates from this version. Rejection closes the draft and archives its risks.": "الاعتماد ينشر تعديلات المهمة المقترحة وتواريخ هذه النسخة. الرفض يغلق المسودة ويؤرشف مخاطرها.",
+  "Approving publishes the proposed task edits and the schedule from this version.": "الاعتماد ينشر تعديلات المهمة المقترحة والجدولة من هذه النسخة.",
+  "Rejecting closes the change draft and archives its risks. Delivery continues on the current plan.": "الرفض يغلق مسودة التغيير ويؤرشف مخاطرها. يستمر التنفيذ وفق الخطة الحالية.",
+  "This version is published. The task changes and schedule are live.": "تم نشر هذه النسخة. تُطبَّق تغييرات المهمة والجدولة في الخطة الحالية.",
+  "The change draft was rejected. Delivery continues on the current plan.": "رُفضت مسودة التغيير. يستمر التنفيذ وفق الخطة الحالية.",
+  "A newer version replaced this plan.": "حلّت نسخة أحدث محل هذه الخطة.",
+  "Change published. The task edits and schedule are live.": "تم نشر التغيير. تُطبَّق تعديلات المهمة والجدولة في الخطة الحالية.",
   "Title": "العنوان",
   "Change approved and applied.": "تم اعتماد التغيير وتطبيقه.",
   "Change request rejected.": "تم رفض طلب التغيير.",
-  "created — computed impact:": "أُنشئ — الأثر المحسوب:",
-  "finding": "ملاحظة",
-  "findings": "ملاحظات",
-  "Decide below.": "قرر في الأسفل.",
 };
 
 /* Regex rules for dynamic strings (numbers, dates) the exact map cannot cover. */
@@ -807,7 +827,7 @@ const actions = {
     }
   },
   "open-project": t => openProject(Number(t.dataset.id)),
-  "tab": el => loadProjectTab(el.dataset.tab),
+  "tab": el => loadProjectTab(el.dataset.tab, projectContext, el.dataset.version ? Number(el.dataset.version) : null),
   "modal": t => { state.modal = { type: t.dataset.modal }; render(); },
   "close-modal": closeModal,
   "backdrop-close": (t, ev) => { if (ev.target === t) closeModal(); },
@@ -865,6 +885,9 @@ const submitters = {
     await reloadProject(); state.modal = null; state.notice = { type: "ok", text: existing ? "Team member updated." : "Team member added." }; render();
   },
   "propose-change": async form => {
+    const context = projectContext;
+    const modal = state.modal;
+    const request = tabRequest;
     const d = new FormData(form);
     const num = v => { const x = String(v).trim(); return x === "" ? null : Number(x); };
     const body = {
@@ -876,14 +899,11 @@ const submitters = {
       assignee_member_id: num(d.get("assignee_member_id")),
       reason: d.get("reason"),
     };
-    const cr = await post(`/projects/${state.project.id}/changes`, body);
+    await post(`/projects/${context.id}/changes`, body);
+    if (!isCurrentProject(context) || state.modal !== modal || tabRequest !== request) return;
     state.modal = null;
-    state.tab = "changes";
-    await reloadChanges();
-    const n = ((cr.impact || {}).impacts || []).length;
-    const sev = (cr.impact || {}).severity;
-    state.notice = { type: "ok", text: `Change request #${cr.id} created — computed impact: ${sev} (${n} finding${n === 1 ? "" : "s"}). Decide below.` };
-    render();
+    state.notice = { type: "ok", text: t("Change request submitted. Review the impact before accepting the proposal.") };
+    await loadProjectTab("changes", context);
   },
   "import-csv": async form => {
     const file = form.elements.file.files[0];
@@ -1063,7 +1083,10 @@ const projectTabs = {
   scope: { load: reloadScope, jobKey: "job", types: ["agent1.extract"] },
   plan: { load: reloadPlan, jobKey: "planJob", types: ["agent2.plan"] },
   schedule: { load: reloadSchedule, jobKey: "scheduleJob", types: ["agent3.schedule"] },
-  planreview: { load: context => Promise.all([reloadPlanReview(true, context), reloadProject(context)]), jobKey: "planReviewJob", types: ["agent3.schedule", "agent4.review"] },
+  planreview: {
+    load: (context, version) => Promise.all([reloadPlanReview(version == null, context, version ?? state.planVersionSel), reloadProject(context)]),
+    jobKey: "planReviewJob", types: ["agent3.schedule", "agent4.review"],
+  },
   changes: { load: reloadChanges },
 };
 
@@ -1071,14 +1094,14 @@ async function loadProjectJobs(context) {
   return api(`/projects/${context.id}/jobs`).catch(e => { if (e.message === "unauthorized") throw e; return null; });
 }
 
-async function loadProjectTab(tab, context = projectContext) {
+async function loadProjectTab(tab, context = projectContext, version = null) {
   if (!isCurrentProject(context)) return;
   const request = ++tabRequest;
   const modal = state.modal;
   const current = () => isCurrentProject(context) && request === tabRequest && state.modal === modal;
   const config = projectTabs[tab];
   try {
-    if (config) await config.load(context);
+    if (config) await config.load(context, version);
     const jobs = current() && config?.jobKey ? await loadProjectJobs(context) : null;
     if (!current()) return;
     state.tab = tab;
@@ -1505,50 +1528,65 @@ const DELIVERY_STATUS = { todo: "To do", in_progress: "In progress", done: "Done
 async function reloadChanges(context = projectContext) {
   const { id } = context;
   const [changes, tasks] = await Promise.all([
-    api(`/projects/${id}/changes`).catch(e => { if (e.message === "unauthorized") throw e; return []; }),
-    state.tasks.length ? Promise.resolve(state.tasks) : api(`/projects/${id}/tasks`),
+    api(`/projects/${id}/changes`),
+    api(`/projects/${id}/tasks`),
   ]);
   if (isCurrentProject(context)) Object.assign(state, { changes, tasks });
 }
 
 const CHANGE_FIELD_LABEL = { title: "Title", estimate_hours: "Estimate (h)", start: "Start", end: "End", assignee_member_id: "Assignee" };
+const CHANGE_PUBLICATION = {
+  pending: ["Awaiting plan approval", "blue"],
+  published: ["Published", "green"],
+  rejected: ["Draft plan rejected", "red"],
+  superseded: ["Draft plan superseded", ""],
+};
 
 function changeView() {
   const list = state.changes || [];
   const open = list.filter(c => c.status === "draft");
-  const high = list.filter(c => c.status === "draft" && c.impact && c.impact.severity === "high");
+  const high = open.filter(c => c.impact?.severity === "high");
+  const pending = list.filter(c => c.publication_status === "pending");
+  const applied = list.filter(c => c.publication_status === "published" || (c.status === "approved" && c.publication_status == null));
   const memberName = id => { const m = state.team.find(x => x.id === id); return m ? m.name : "#" + id; };
   const fmtVal = (k, v) => k === "assignee_member_id" ? (v == null ? "—" : memberName(v)) : (v == null ? "—" : String(v));
 
   const cards = list.map(c => {
     const p = c.payload || {}, imp = c.impact || {};
     const task = state.tasks.find(t => t.id === c.target_task_id);
+    const title = task?.title || p.before?.title || t("Task") + (c.target_task_id ? ` #${c.target_task_id}` : "");
     const diffs = Object.keys(p.after || {}).map(k =>
       `<tr><td style="padding:3px 8px;border-top:1px solid var(--line)">${t(CHANGE_FIELD_LABEL[k] || k)}</td><td style="padding:3px 8px;border-top:1px solid var(--line);color:var(--ink-soft)">${esc(fmtVal(k, (p.before || {})[k]))}</td><td style="padding:3px 8px;border-top:1px solid var(--line)">→</td><td style="padding:3px 8px;border-top:1px solid var(--line);font-weight:700">${esc(fmtVal(k, p.after[k]))}</td></tr>`
     ).join("");
     const sev = imp.severity === "high" ? '<span class="badge red">High impact</span>' : imp.severity === "medium" ? '<span class="badge blue">Medium impact</span>' : '<span class="badge green">Low impact</span>';
     const impacts = (imp.impacts || []).map(i => `<div class="row-meta"><span class="subtle">• ${esc(i.message)}</span></div>`).join("");
+    const [label, color] = c.status === "draft" ? ["Proposed", "blue"] : c.status === "rejected" ? ["Proposal rejected", "red"] : CHANGE_PUBLICATION[c.publication_status] || ["Applied", "green"];
+    const linkedVersion = c.plan_version == null ? "" : `<span class="subtle">${t("Plan")} v${esc(c.plan_version)}</span>`;
     const decided = c.status === "draft"
-      ? `<div class="item-actions" style="margin-top:8px"><button class="btn btn-primary btn-small" data-action="change-decide" data-id="${c.id}" data-status="approved">Approve & apply</button><button class="btn btn-danger btn-small" data-action="change-decide" data-id="${c.id}" data-status="rejected">Reject</button></div>`
-      : `<div class="row-meta" style="margin-top:6px"><span class="subtle">${c.status === "approved" ? "Applied" : "Rejected"} · ${esc(fmtDateTime(c.reviewed_at))}</span></div>`;
+      ? `<div class="item-actions" style="margin-top:8px"><button class="btn btn-primary btn-small" data-action="change-decide" data-id="${esc(c.id)}" data-status="approved">${t("Accept proposal")}</button><button class="btn btn-danger btn-small" data-action="change-decide" data-id="${esc(c.id)}" data-status="rejected">${t("Reject proposal")}</button></div>`
+      : c.publication_status === "pending" && c.plan_version != null
+        ? `<div class="item-actions" style="margin-top:8px"><button class="btn btn-primary btn-small" data-action="tab" data-tab="planreview" data-version="${esc(c.plan_version)}">${t("Review plan")}</button></div>`
+        : "";
     return `<div class="pf-card"><div style="display:flex;gap:12px;align-items:flex-start;flex:1;min-width:0"><div style="flex:1;min-width:0">
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="project-title">${esc(task ? task.title : "Task #" + c.target_task_id)}</span>${c.status === "draft" ? '<span class="badge blue">Draft</span>' : c.status === "approved" ? '<span class="badge green">Approved</span>' : '<span class="badge">Rejected</span>'}${sev}</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="project-title">${esc(title)}</span><span class="badge ${color}">${t(label)}</span>${sev}</div>
+      <div class="row-meta"><span class="subtle">${t("Change request")} #${esc(c.id)}</span>${linkedVersion}</div>
       <div class="row-meta"><span class="subtle">${esc(c.reason)}</span></div>
+      ${c.publication_status === "pending" ? `<p class="subtle">${t("The proposal is accepted. The current plan stays live while this version awaits approval.")}</p>` : ""}
       <table style="border-collapse:collapse;margin:6px 0;font-size:13px"><tbody>${diffs}</tbody></table>
       ${impacts}
-      <div class="row-meta"><span class="subtle">${esc(c.created_by)} · ${esc(fmtDateTime(c.created_at))}</span></div>
+      <div class="row-meta"><span class="subtle">${esc(c.created_by)} · ${esc(fmtDateTime(c.created_at))}</span>${c.reviewed_at ? `<span class="subtle">${t("Decided")} ${esc(fmtDateTime(c.reviewed_at))}</span>` : ""}</div>
     </div></div>${decided}</div>`;
   }).join("");
 
-  const chips = `<div class="pf-chips">${pfChip(open.length, t("Open change requests"), open.length ? "warn" : "ok")}${pfChip(high.length, t("High impact"), high.length ? "bad" : "ok")}${pfChip(list.filter(c => c.status === "approved").length, t("Applied"), "")}</div>`;
-  const empty = `<div class="empty"><div class="empty-icon">✎</div><h3>${t("No change requests")}</h3><p>${t("Approved tasks are locked. Propose a change from the Work plan — the impact is computed before you decide.")}</p></div>`;
-  return `${chips}<section class="card"><div class="card-body">${list.length ? `<div class="project-list">${cards}</div>` : empty}</div></section>`;
+  const chips = `<div class="pf-chips">${pfChip(open.length, t("Proposed changes"), open.length ? "warn" : "ok")}${pfChip(high.length, t("High impact"), high.length ? "bad" : "ok")}${pfChip(pending.length, t("Awaiting plan approval"), pending.length ? "warn" : "")}${pfChip(applied.length, t("Applied"), "")}</div>`;
+  const empty = `<div class="empty"><div class="empty-icon">✎</div><h3>${t("No change requests")}</h3><p>${t("Propose a task change from the Work plan to see its impact.")}</p></div>`;
+  return `<div class="page-head"><div><h1>${t("Changes")}</h1><p>${t("Accept a proposal to create a draft plan. Approve the draft in Plan review to publish the changes.")}</p></div></div>${chips}<section class="card"><div class="card-body">${list.length ? `<div class="project-list">${cards}</div>` : empty}</div></section>`;
 }
 
 function proposeChangeModal(task) {
   const opts = state.team.map(m => `<option value="${m.id}"${m.id === task.assignee_member_id ? " selected" : ""}>${esc(m.name)}</option>`).join("");
   const dv = v => v ? esc(String(v).slice(0, 10)) : "";
-  return modalShell(t("Propose a change"), t("The task is approved — your edit becomes a tracked change request with a computed impact."),
+  return modalShell(t("Propose a change"), t("Propose edits to this approved task and review their impact. Accepting the proposal creates a draft plan for approval."),
     "propose-change",
     `<div class="form-grid">
       <input type="hidden" name="task_id" value="${task.id}">
@@ -1651,12 +1689,25 @@ Object.assign(actions, {
     state.modal = { type: "propose-change", task }; render();
   },
   "change-decide": async el => {
-    const status = el.dataset.status;
-    if (!confirm(status === "approved" ? "Approve and APPLY this change to the task?" : "Reject this change request? Nothing will change.")) return;
-    await post(`/projects/${state.project.id}/changes/${el.dataset.id}/decision`, { decision: status, comment: "" });
-    await reloadChanges(); await reloadSchedule();
-    state.notice = { type: "ok", text: status === "approved" ? "Change approved and applied." : "Change request rejected." };
-    render();
+    const context = projectContext;
+    const request = tabRequest;
+    const decision = el.dataset.status;
+    const accept = decision === "approved";
+    if (!confirm(t(accept ? "Accept this proposal and create a draft plan for review?" : "Reject this change proposal?"))) return;
+    el.disabled = true;
+    try {
+      const change = await post(`/projects/${context.id}/changes/${el.dataset.id}/decision`, { decision, comment: "" });
+      if (!isCurrentProject(context)) return;
+      state.changes = state.changes.map(row => row.id === change.id ? change : row);
+      if (request !== tabRequest || state.tab !== "changes" || state.modal) return;
+      const acceptedMessage = change.publication_status === "pending"
+        ? "Proposal accepted. Review the draft plan to publish the change. The current plan stays live in the meantime."
+        : "Change approved and applied.";
+      state.notice = { type: "ok", text: t(accept ? acceptedMessage : "Change request rejected.") };
+      render();
+    } finally {
+      el.disabled = false;
+    }
   },
   "export-pdf": async () => {    state.notice = { type: "ok", text: "Building the PDF report…" }; render();
     try {
@@ -1761,6 +1812,8 @@ function planReviewView() {
   const running = job && ["queued", "running"].includes(job.status);
   const openable = ["planning", "plan_review", "active"].includes(state.project.status);
   const canReview = !!d && d.status === "draft";
+  const snap = d?.snapshot || {};
+  const changePlan = snap.change_request_id != null;
   const genHint = openable
     ? t("Agent 3 builds the schedule from the approved tasks and saves a new draft version. Task dates are written only when you approve the plan.")
     : t("Agent 3 needs an approved work plan first. Current status:") + " " + t(STATUS[state.project.status] || state.project.status);
@@ -1770,9 +1823,8 @@ function planReviewView() {
       ? t("Only a draft can be reviewed. This version is") + " " + t(PV_LABEL[d.status] || d.status) + "."
       : t("Ask Agent 4 to review the current draft again; it replaces the stored review.");
   const jobLine = job ? `<div class="callout${job.status === "failed" ? " warning" : ""}">${t("Agent job")} #${esc(job.id)} (${esc(job.type)}): <b>${esc(job.status)}</b> (${esc(job.progress)}%)${job.error ? "<br>" + esc(job.error) : ""}</div>` : "";
-  const steps = `<div class="callout" style="margin-top:10px"><b>${t("How it works")}</b><br>${t("1. Run Agent 3: it schedules the approved tasks and saves a draft version. 2. Agent 4 reviews that draft automatically and stores its risks. 3. Open the gate, then approve or reject the plan.")}</div>`;
-  const snap0 = (d && d.snapshot) || {};
-  const reviewed = !!snap0.review;
+  const steps = `<div class="callout" style="margin-top:10px"><b>${t("How it works")}</b><br>${t(changePlan ? "Review the proposed task edits and their schedule impact. Approve the plan to publish both." : "1. Run Agent 3: it schedules the approved tasks and saves a draft version. 2. Agent 4 reviews that draft automatically and stores its risks. 3. Open the gate, then approve or reject the plan.")}</div>`;
+  const reviewed = !!snap.review;
   const gateState0 = gate ? gate.state : "not_started";
   // The line under the actions explains the PRIMARY button, so the screen tells one story.
   const nextHint = running
@@ -1786,7 +1838,7 @@ function planReviewView() {
           : !reviewed
             ? t("Agent 4 has not reviewed this draft yet. Run the review before opening the gate.")
             : gateState0 === "waiting_for_pm"
-              ? t("The gate is open: approve to write the dates, or reject to archive the draft.")
+              ? t(changePlan ? "Choose whether to publish this change." : "The gate is open: approve to write the dates, or reject to archive the draft.")
               : t("Reviewed. Open the approval gate when you are ready to decide.");
   // One primary button = the PM's next step in the flow; everything else is a light tool below it.
   const primary = running
@@ -1806,7 +1858,7 @@ function planReviewView() {
               : `<button class="btn btn-primary btn-small" data-action="plan-open-gate"${openable ? "" : " disabled"}>${t("Open approval gate")}</button>`;
   const tools = `<details class="head-menu"><summary class="btn btn-quiet btn-small" title="${esc(t("More actions"))}">⋯ ${t("More")}</summary><div>${[
     canReview && reviewed ? `<button class="btn btn-quiet btn-small" data-action="plan-review" title="${esc(reviewHint)}">${t("Review with Agent 4 again")}</button>` : "",
-    versions.length && openable && d && d.status === "draft" ? `<button class="btn btn-quiet btn-small" data-action="plan-generate" title="${esc(genHint)}">${t("Re-run Agent 3")}</button>` : "",
+    openable && canReview && !changePlan ? `<button class="btn btn-quiet btn-small" data-action="plan-generate" title="${esc(genHint)}">${t("Re-run Agent 3")}</button>` : "",
     `<button class="btn btn-quiet btn-small" data-action="plan-refresh">${t("Refresh")}</button>`,
   ].filter(Boolean).join("")}</div></details>`;
   const head = `<div class="page-head"><div><div class="eyebrow">M6-B · Agent 4</div><h1>${t("Plan review")}</h1><p>${t("One versioned snapshot of the whole plan. Agent 4 stores risks and findings; the PM approves or rejects the plan as a unit through the gate.")}</p>${steps}</div><div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-end">${primary}<button class="btn btn-secondary btn-small" data-action="plan-rules-review"${running || !canReview ? " disabled" : ""} title="${esc(t("Runs only the deterministic checks (no LLM): instant, free, and always available when the model is rate-limited."))}">${t("Automatic checks only")}</button>${tools}</div><p class="subtle" style="max-width:320px;text-align:end;margin:0">${esc(nextHint)}</p></div></div>`;
@@ -1815,7 +1867,6 @@ function planReviewView() {
   const versionChips = versions.map(v => `<button class="btn ${state.planVersionSel === v.version ? "btn-primary" : "btn-secondary"} btn-small" data-action="plan-version" data-v="${v.version}">v${esc(v.version)} · ${t(PV_LABEL[v.status] || v.status)}</button>`).join(" ");
   if (!d) return `${head}${jobLine}<div style="display:flex;gap:6px;flex-wrap:wrap;margin:12px 0">${versionChips}</div>`;
 
-  const snap = d.snapshot || {};
   const sched = snap.schedule || {};
   const tasks = snap.tasks || [];
   const conflicts = snap.conflicts || [];
@@ -1825,12 +1876,17 @@ function planReviewView() {
   const gateBadge = gateState === "waiting_for_pm" ? `<span class="badge" style="background:#fff4e5;color:#9a5b00">${t("Waiting for your decision")}</span>` : gateState === "completed" ? `<span class="badge green">${t("Gate completed")}</span>` : `<span class="badge">${t("Gate closed")}</span>`;
   const draft = d.status === "draft";
 
+  const closedNotes = {
+    approved: changePlan ? "This version is published. The task changes and schedule are live." : "This plan is approved. Its snapshot dates are live on the tasks.",
+    rejected: changePlan ? "The change draft was rejected. Delivery continues on the current plan." : "This version was rejected. Nothing was written to the tasks.",
+    superseded: "A newer version replaced this plan.",
+  };
   const gateActions = !draft
-    ? `<div class="callout">${d.status === "approved" ? t("This plan is approved. Its snapshot dates are live on the tasks.") : t("This version was rejected. Nothing was written to the tasks.")} ${t("Run Agent 3 again to create a new draft if you want another review.")}</div>`
+    ? `<div class="callout">${t(closedNotes[d.status] || PV_LABEL[d.status])}</div>`
     : `<div class="item-actions" style="margin-top:12px;flex-wrap:wrap">${gateState === "waiting_for_pm"
         ? `<button class="btn btn-primary" data-action="plan-approve">${t("Approve plan")}</button><button class="btn btn-secondary" data-action="plan-reject">${t("Reject plan")}</button>`
         : `<button class="btn btn-primary" data-action="plan-open-gate"${openable ? "" : " disabled"}>${t("Open approval gate")}</button>`}</div>
-      <p class="subtle" style="margin-top:6px">${gateState === "waiting_for_pm" ? t("The gate is open. Approval applies the planned dates and activates the project. Rejection archives the draft risks.") : t("Opening the gate moves the project to Plan review and waits for your decision.")}</p>`;
+      <p class="subtle" style="margin-top:6px">${gateState === "waiting_for_pm" ? t(changePlan ? "Approval publishes the proposed task edits and the dates from this version. Rejection closes the draft and archives its risks." : "The gate is open. Approval applies the planned dates and activates the project. Rejection archives the draft risks.") : t("Opening the gate moves the project to Plan review and waits for your decision.")}</p>`;
 
   const warningsHtml = warnings.length ? `<div class="callout warning"><b>${t("Warnings to acknowledge")}</b><br>${warnings.map(esc).join("<br>")}</div>` : `<div class="callout">${t("No warnings: the conflicts, verdict and critical risks do not block this approval.")}</div>`;
   const reviewHtml = pvReviewCard(snap);
@@ -1839,12 +1895,13 @@ function planReviewView() {
 
   const approvedNote = d.approved_at ? `<p class="subtle" style="margin-top:8px">${t("Approved")} ${esc(fmtDateTime(d.approved_at))}</p>` : "";
   const vsApproved = d.diff_vs_approved ? `<section class="card section-card"><h2>${t("Changes vs the approved plan")}</h2><p class="section-intro">${t("Everything that would change if this draft replaced the currently approved version.")}</p>${pvDiffTable(d.diff_vs_approved)}</section>` : "";
+  const sourceChange = changePlan ? `<div class="row-meta" style="margin-bottom:8px"><span>${t("Source change request")} #${esc(snap.change_request_id)}</span><button class="btn btn-secondary btn-small" data-action="tab" data-tab="changes">${t("Changes")}</button></div>` : "";
 
   return `${head}${jobLine}
 <div style="display:flex;gap:6px;flex-wrap:wrap;margin:12px 0">${versionChips}</div>
 <div class="grid two-col">
   <section class="card section-card"><h2>${t("Version")} ${esc(d.version)} ${pvBadge(d.status)} ${gateBadge}</h2>
-    <p class="section-intro">${t("Built by")} ${esc(d.created_by)} · ${esc(fmtDateTime(d.created_at))}${d.base_version ? " · " + t("based on v") + esc(d.base_version) : ""}</p>
+    <p class="section-intro">${t("Built by")} ${esc(d.created_by)} · ${esc(fmtDateTime(d.created_at))}${d.base_version ? " · " + t("based on v") + esc(d.base_version) : ""}</p>${sourceChange}
     <div class="keyvals">${kv(t("Project start"), fmtDate(sched.project_start))}${kv(t("Project end"), fmtDate(sched.project_end))}${kv(t("Duration"), (sched.total_duration_days || 0) + " " + t("working days"))}${kv(t("Tasks"), String(tasks.length))}${kv(t("Critical path"), String((sched.critical_path || []).length) + " " + t("tasks"))}${kv(t("Resource conflicts"), String(conflicts.length))}${kv(t("Open risks"), String(risks.filter(r => r.status === "draft" || r.status === "open").length))}</div>
     ${approvedNote}${gateActions}
   </section>
@@ -1861,11 +1918,12 @@ ${vsApproved}
 function planGateModal() {
   const m = state.modal;
   const d = m.detail;
+  const changePlan = d.snapshot?.change_request_id != null;
   const warnings = d.warnings || [];
   if (m.type === "plan-reject")
-    return modalShell(t("Reject plan"), t("The draft is rejected and its risks are archived. Nothing is written to the tasks."), "plan-reject",
+    return modalShell(t("Reject plan"), t(changePlan ? "Rejecting closes the change draft and archives its risks. Delivery continues on the current plan." : "The draft is rejected and its risks are archived. Nothing is written to the tasks."), "plan-reject",
       field(t("Reason *"), '<textarea name="comment" required minlength="3" maxlength="2000"></textarea>', true), t("Reject plan"));
-  return modalShell(t("Approve plan"), t("Approving applies the dates from this plan version and moves the project to active."), "plan-approve",
+  return modalShell(t("Approve plan"), t(changePlan ? "Approving publishes the proposed task edits and the schedule from this version." : "Approving applies the dates from this plan version and moves the project to active."), "plan-approve",
     `${warnings.length ? `<div class="callout warning"><b>${t("Warnings to acknowledge")}</b><br>${warnings.map(esc).join("<br>")}</div><label style="display:flex;gap:8px;align-items:center;margin:8px 0"><input type="checkbox" name="ack" required> ${t("I acknowledge these warnings")}</label>` : ""}${field(t("Comment"), `<textarea name="comment" maxlength="2000">${esc(m.comment)}</textarea>`, true)}`, t("Approve plan"));
 }
 
@@ -1914,6 +1972,7 @@ Object.assign(submitters, {
     const context = projectContext;
     const modal = state.modal;
     const { version, warnings, warnings_token } = modal.detail;
+    const changePlan = modal.detail.snapshot?.change_request_id != null;
     const fd = new FormData(form);
     const comment = String(fd.get("comment") || "").trim();
     const body = { comment, acknowledge_warnings: !!fd.get("ack") };
@@ -1935,9 +1994,13 @@ Object.assign(submitters, {
     }
     if (!isCurrentProject(context)) return;
     if (currentModal()) state.modal = null;
-    let message = t("Plan") + " v" + res.version + " " + t("approved") + " — " + (res.tasks_applied || 0) + " " + t("task date(s) written.");
+    let message = changePlan
+      ? t("Change published. The task edits and schedule are live.")
+      : t("Plan") + " v" + res.version + " " + t("approved") + " — " + (res.tasks_applied || 0) + " " + t("task date(s) written.");
     try {
-      await Promise.all([reloadProject(context), reloadPlanReview(false, context), reloadSchedule(context)]);
+      const refresh = [reloadProject(context), reloadPlanReview(false, context), reloadSchedule(context)];
+      if (changePlan && state.tab === "changes") refresh.push(reloadChanges(context));
+      await Promise.all(refresh);
     } catch (e) {
       if (e.message === "unauthorized") return;
       message = t("The decision was saved. Refresh to load the latest project data.");
@@ -1949,13 +2012,22 @@ Object.assign(submitters, {
   "plan-reject": async form => {
     const context = projectContext;
     const modal = state.modal;
+    const changePlan = modal.detail.snapshot?.change_request_id != null;
     const fd = new FormData(form);
     await post(`/projects/${context.id}/plan/versions/${modal.detail.version}/reject`, { comment: String(fd.get("comment") || "").trim() });
     if (!isCurrentProject(context)) return;
     if (state.modal === modal) state.modal = null;
-    await Promise.all([reloadProject(context), reloadPlanReview(false, context)]);
+    let message = t(changePlan ? "The change draft was rejected. Delivery continues on the current plan." : "Plan rejected. Nothing was written to the tasks.");
+    try {
+      const refresh = [reloadProject(context), reloadPlanReview(false, context)];
+      if (changePlan && state.tab === "changes") refresh.push(reloadChanges(context));
+      await Promise.all(refresh);
+    } catch (e) {
+      if (e.message === "unauthorized") return;
+      message = t("The decision was saved. Refresh to load the latest project data.");
+    }
     if (!isCurrentProject(context) || state.modal) return;
-    state.notice = { type: "ok", text: t("Plan rejected. Nothing was written to the tasks.") };
+    state.notice = { type: "ok", text: message };
     render();
   },
 });

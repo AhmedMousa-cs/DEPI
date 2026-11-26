@@ -65,6 +65,7 @@ class TaskInput(_Base):
     assignee_id: str | None = None
     depends_on: tuple[str, ...] = ()
     not_before: date | None = None  # "can't start before" constraint
+    fixed_start: date | None = None  # an exact published or proposed PM date
 
     @field_validator("id", "assignee_id", mode="before")
     @classmethod

@@ -15,16 +15,24 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.agents import agent3_schedule
-from app.agents.agent3_schedule import PROMPT_VERSION, run_agent3
+from app.agents.agent3_schedule import PROMPT_VERSION
 from app.audit import write_audit
 from app.config import settings
 from app.db.models import Job
 from app.db.session import SessionLocal
 from app.llm.runner import StructuredRun, run_structured
 from app.schemas.plan import TaskOverride
-from app.schemas.scheduling import TaskInput, TeamMemberInput
+from app.schemas.scheduling import EGYPT_CALENDAR
+from app.services.change_schedule import build_schedule_inputs, schedule_constraints
 from app.services.jobs import JobContext, PermanentJobError, register
-from app.services.plan_versions import build_snapshot, create_draft_version, load_plan_inputs
+from app.services.plan_versions import (
+    PendingChangeDraft,
+    build_snapshot,
+    create_draft_version,
+    current_approved,
+    ensure_can_replace_draft,
+    load_plan_inputs,
+)
 from app.services.scheduling import save_schedule_draft
 
 log = logging.getLogger("nexus.agent3_job")
@@ -94,6 +102,11 @@ def run_agent3_schedule(ctx: JobContext, params: dict) -> str:
         if job is None:
             raise PermanentJobError("job not found")
         project_id = job.project_id
+        try:
+            ensure_can_replace_draft(db, project_id)
+        except PendingChangeDraft as exc:
+            raise PermanentJobError(str(exc)) from None
+        published = current_approved(db, project_id)
         inputs = load_plan_inputs(db, project_id)
     if inputs.project["status"] not in PLANNABLE_STATUSES:
         raise PermanentJobError(
@@ -104,34 +117,38 @@ def run_agent3_schedule(ctx: JobContext, params: dict) -> str:
         raise PermanentJobError(f"Approved tasks depend on tasks that are not approved: {inputs.dangling[:5]}")
     ctx.heartbeat(progress=10)
 
-    overrides = _parse_overrides(params.get("overrides"), {t["id"] for t in inputs.tasks},
-                                 {m["id"] for m in inputs.members})
-    by_task = {o["task_id"]: o for o in overrides}
+    task_ids = {task["id"] for task in inputs.tasks}
+    requested = _parse_overrides(params.get("overrides"), task_ids, {m["id"] for m in inputs.members})
+    baseline = published.snapshot if published is not None else {}
+    overrides, fixed_dates = schedule_constraints(baseline, task_ids, requested)
     start_raw = params.get("start_date") or inputs.project["start_date"]
-    start = date.fromisoformat(start_raw) if start_raw else date.today()
-
-    tasks = []
-    for t in inputs.tasks:
-        o = by_task.get(t["id"], {})
-        tasks.append(TaskInput(
-            id=t["id"], title=t["title"], estimate_hours=t["estimate_hours"], duration_days=o.get("duration_days"),
-            assignee_id=o.get("assignee_member_id", t["assignee_member_id"]), depends_on=inputs.deps[t["id"]]))
-    members = [TeamMemberInput(id=m["id"], name=m["name"], capacity_hours_per_week=m["capacity_hours_per_week"],
-                               available_from=m["available_from"], available_to=m["available_to"])
-               for m in inputs.members]
+    if fixed_dates and not params.get("start_date") and baseline["project"]["start_date"] == start_raw:
+        start_raw = baseline["schedule"]["project_start"]
     # Every LLM call goes through run_structured (budget, agent_runs, audit, Langfuse). Agent 2
     # always fills estimate_hours, so the estimator stays silent in the normal flow; the adapter
     # is only used for missing estimates and the explanation wording (degrades to the
     # deterministic template on any failure).
     llm = BudgetedLLM(project_id, ctx.job_id)
     try:
-        output = agent3_schedule.run_agent3(tasks, members, start, llm=llm)
-    except agent3_schedule.SchedulingError as exc:
+        start = date.fromisoformat(start_raw) if start_raw else date.today()
+        tasks, members = build_schedule_inputs(inputs, overrides, fixed_dates)
+        output = agent3_schedule.run_agent3(tasks, members, start, calendar=EGYPT_CALENDAR, llm=llm)
+    except ValueError as exc:
         raise PermanentJobError(str(exc)) from None
     ctx.heartbeat(progress=70)
 
-    snapshot = build_snapshot(inputs=inputs, output=output, overrides=overrides)
+    snapshot = build_snapshot(inputs=inputs, output=output, overrides=[overrides[key] for key in sorted(overrides)])
+    snapshot["fixed_dates"] = [fixed_dates[key] for key in sorted(fixed_dates)]
     with SessionLocal() as db:  # one transaction: schedule draft + plan version + audits
+        try:
+            pv = create_draft_version(db, project_id=project_id, snapshot=snapshot, created_by=ACTOR)
+        except PendingChangeDraft as exc:
+            raise PermanentJobError(str(exc)) from None
+        # The project lock held by draft creation prevents a publication between this
+        # check and commit. Discard schedules computed from constraints that just changed.
+        current = current_approved(db, project_id)
+        if (current.id if current else None) != (published.id if published else None):
+            raise PermanentJobError("The approved plan changed during scheduling. Run Agent 3 again.")
         draft = save_schedule_draft(
             db,
             project_id=project_id,
@@ -163,7 +180,6 @@ def run_agent3_schedule(ctx: JobContext, params: dict) -> str:
                 "explanation_source": output.explanation.source,
             },
         )
-        pv = create_draft_version(db, project_id=project_id, snapshot=snapshot, created_by=ACTOR)
         write_audit(db, ACTOR, "agent3.schedule_completed", "project", project_id,
                     after={"job_id": ctx.job_id, "version": pv.version, "tasks": len(snapshot["tasks"]),
                            "conflicts": len(snapshot["conflicts"]), "overrides": len(overrides),

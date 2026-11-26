@@ -25,7 +25,7 @@ from app.tools.scheduling_errors import (
 )
 
 _ONE_DAY = timedelta(days=1)
-MAX_HORIZON_DAYS = 3650  # not_before can't be more than ~10y after the start
+MAX_HORIZON_DAYS = 3650  # date constraints can't be more than ~10y after the start
 
 
 class WorkdayIndex:
@@ -111,6 +111,18 @@ def _topological_order(tasks: Sequence[TaskInput]) -> list[str]:
     return order
 
 
+def _fixed_start_offset(task: TaskInput, fixed_start: date, idx: WorkdayIndex, calendar: WorkCalendar) -> int:
+    if task.duration_days == 0:
+        raise InvalidInputError(f"Task {task.id}: a fixed date window needs at least one working day")
+    if fixed_start < idx.first:
+        raise InvalidInputError(f"Task {task.id}: fixed start {fixed_start} is before the project start {idx.first}")
+    if not calendar.is_working_day(fixed_start):
+        raise InvalidInputError(f"Task {task.id}: fixed start {fixed_start} must be a working day")
+    if (fixed_start - idx.first).days > MAX_HORIZON_DAYS:
+        raise InvalidInputError(f"Task {task.id}: fixed start is too far in the future")
+    return idx.offset_of(fixed_start)
+
+
 def compute_dates(
     tasks: Sequence[TaskInput],
     project_start: date,
@@ -132,6 +144,13 @@ def compute_dates(
                 raise InvalidInputError(f"Task {tid}: not_before is too far in the future")
             lower = idx.offset_of(t.not_before)
         start = max([ef[d] for d in t.depends_on] + [lower])
+        if t.fixed_start is not None:
+            fixed = _fixed_start_offset(t, t.fixed_start, idx, cal)
+            if start > fixed:
+                raise InvalidInputError(
+                    f"Task {tid}: fixed start {t.fixed_start} conflicts with its dependencies or earliest start"
+                )
+            start = fixed
         es[tid] = start
         ef[tid] = start + t.duration_days  # type: ignore[operator]
     total = max(ef.values(), default=0)
@@ -144,7 +163,8 @@ def compute_dates(
     ls: dict[str, int] = {}
     lf: dict[str, int] = {}
     for tid in reversed(order):
-        lf[tid] = min([ls[s] for s in succ[tid]], default=total)
+        latest = ef[tid] if by_id[tid].fixed_start is not None else total
+        lf[tid] = min([latest, *(ls[s] for s in succ[tid])])
         ls[tid] = lf[tid] - by_id[tid].duration_days  # type: ignore[operator]
 
     float_: dict[str, int] = {tid: ls[tid] - es[tid] for tid in order}

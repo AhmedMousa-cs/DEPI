@@ -106,6 +106,10 @@ def generate(project_id: int, body: GenerateBody, db: Session = Depends(get_db),
     project: Project = get_project_or_404(db, project_id)
     if project.status not in OPENABLE_STATUSES:
         raise HTTPException(409, f"A plan can't be built while the project is '{project.status}'; approve the scope first.")
+    try:
+        pvs.ensure_can_replace_draft(db, project_id)
+    except pvs.PendingChangeDraft as exc:
+        raise HTTPException(409, str(exc)) from exc
     params = body.model_dump(exclude_none=True)
     return _enqueue(db, user, project_id, "agent3.schedule", params)
 

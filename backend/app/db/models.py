@@ -392,12 +392,7 @@ class TaskDependency(Base):
 
 
 class ChangeRequest(Base):
-    """M11 change management: the PM's formal, audited edit of an APPROVED item.
-
-    Every change to an approved task goes through here: propose (with a
-    deterministic impact analysis computed by code) -> decide. Agents never
-    create or approve change requests; approving applies the change and audits it.
-    """
+    """A PM's proposed task edit and the plan version staged on acceptance."""
 
     __tablename__ = "change_requests"
 
@@ -408,6 +403,9 @@ class ChangeRequest(Base):
     kind: Mapped[str] = mapped_column(String(40), default="task_update")
     target_task_id: Mapped[int | None] = mapped_column(
         ForeignKey("tasks.id", ondelete="CASCADE"), nullable=True
+    )
+    plan_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("plan_versions.id", name="fk_change_requests_plan_version", ondelete="SET NULL"), nullable=True
     )
     # {"before": {...}, "after": {...}} — field-level diff of what is proposed
     payload: Mapped[dict] = mapped_column(JSON)
@@ -423,6 +421,8 @@ class ChangeRequest(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+    __table_args__ = (UniqueConstraint("plan_version_id", name="uq_change_requests_plan_version_id"),)
 
 
 class Decision(Base):

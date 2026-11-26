@@ -134,7 +134,8 @@ def build_plan_graph(writer) -> StateGraph:
         # Preserve the waiting gate when the transaction detects an input or warning change
         # after the API precheck. The PM can review again, retry, or reject the draft.
         result = state.get("result") or {}
-        if result.get("code") in ("inputs_busy", "inputs_changed", "warnings_changed", "warnings_not_acknowledged"):
+        if result.get("code") in ("inputs_busy", "inputs_changed", "review_in_progress", "warnings_changed",
+                                  "warnings_not_acknowledged"):
             return "await_plan_node"
         return END
 
@@ -164,7 +165,7 @@ class PlanGate:
         return {"thread_id": make_plan_thread_id(project_id, version), "state": state,
                 "run_id": values.get("run_id"), "result": values.get("result")}
 
-    def open(self, project_id: int, version: int) -> dict:
+    def open(self, project_id: int, version: int, *, for_rejection: bool = False) -> dict:
         """Put the project in plan_review and wait for the PM. Idempotent while already waiting."""
         current = self.status(project_id, version)
         if current["state"] == "waiting_for_pm":
@@ -180,10 +181,10 @@ class PlanGate:
                 raise PlanGateNotAllowed("plan version not found")
             if pv.status != "draft":
                 raise PlanGateNotAllowed(f"plan version {version} is '{pv.status}', only a draft can be approved")
-            if not pv.snapshot.get("review"):
+            review = pv.snapshot.get("review") or {}
+            if not review and not (for_rejection and pv.snapshot.get("change_request_id") is not None):
                 raise PlanGateNotAllowed("Agent 4 has not reviewed this draft yet")
-            review = pv.snapshot["review"]
-            summary = {"version": version, "verdict": review["verdict"],
+            summary = {"version": version, "verdict": review.get("verdict"),
                        "conflicts": len(pv.snapshot.get("conflicts", [])),
                        "risks": len(pv.snapshot.get("risks", [])),
                        "project_end": pv.snapshot["schedule"]["project_end"],

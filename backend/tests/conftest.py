@@ -75,6 +75,7 @@ settings.database_url = TEST_DATABASE_URL.render_as_string(
 )
 
 from app.db.session import SessionLocal, engine  # noqa: E402
+from app.orchestrator.checkpoints import initialize_postgres_checkpoints  # noqa: E402
 from app.seed import seed  # noqa: E402
 
 
@@ -101,6 +102,7 @@ def migrate_and_seed_test_database():
     command.downgrade(alembic_config, "base")
     command.upgrade(alembic_config, "head")
 
+    initialize_postgres_checkpoints()
     seed()
 
     yield

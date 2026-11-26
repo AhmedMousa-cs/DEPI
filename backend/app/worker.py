@@ -5,6 +5,7 @@ import time
 
 import app.services.job_handlers  # noqa: F401  (registers handlers)
 from app.config import settings
+from app.orchestrator.checkpoints import initialize_postgres_checkpoints
 from app.services.jobs import process_one, recover_stale
 
 log = logging.getLogger("nexus.worker")
@@ -23,6 +24,7 @@ def main() -> None:
     )
     signal.signal(signal.SIGTERM, _request_stop)
     signal.signal(signal.SIGINT, _request_stop)
+    initialize_postgres_checkpoints()
     log.info("worker started")
     last_recovery = 0.0
     while not _stop:

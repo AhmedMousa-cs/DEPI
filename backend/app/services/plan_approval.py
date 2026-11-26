@@ -9,14 +9,15 @@ import hashlib
 import json
 from datetime import date, datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.audit import write_audit
-from app.db.models import ChangeRequest, Decision, PlanVersion, Project, Risk, Task
+from app.db.models import ChangeRequest, Decision, Job, PlanVersion, Project, Risk, Task
 from app.services.changes import task_change_baseline
 from app.services import plan_versions as pvs
+from app.services.jobs import ACTIVE_STATUSES
 
 PLAN_STATUS_FOR_REVIEW = "plan_review"
 
@@ -81,6 +82,13 @@ def approval_blockers(db: Session, project: Project | None, pv: PlanVersion | No
         return {"code": "superseded", "message": f"Version {latest.version} replaced this draft."}
     if not pv.snapshot.get("review"):
         return {"code": "not_reviewed", "message": "Agent 4 has not reviewed this draft yet."}
+    job_version = Job.params["version"].as_string()
+    review_job = db.scalar(select(Job.id).where(
+        Job.project_id == pv.project_id, Job.type == "agent4.review", Job.status.in_(ACTIVE_STATUSES),
+        or_(job_version.is_(None), job_version == str(pv.version)),
+    ).limit(1))
+    if review_job is not None:
+        return {"code": "review_in_progress", "message": "Wait for Agent 4 to finish reviewing this draft."}
     inputs = pvs.load_plan_inputs(db, pv.project_id, lock=lock_inputs)
     is_change_plan = pv.snapshot.get("change_request_id") is not None
     if not pvs.snapshot_matches_inputs(pv.snapshot, inputs):
@@ -179,7 +187,13 @@ def reject_plan(db: Session, *, project_id: int, version: int, decided_by: int, 
                 run_id: str | None = None) -> dict:
     actor = f"user:{decided_by}"
     project = db.scalar(select(Project).where(Project.id == project_id).with_for_update())
-    pv = pvs.get_version(db, project_id, version, lock=True)
+    try:
+        with db.begin_nested():
+            pv = pvs.get_version(db, project_id, version, lock=True, nowait=True)
+    except OperationalError as exc:
+        if getattr(exc.orig, "sqlstate", None) != "55P03":
+            raise
+        return {"written": False, "code": "inputs_busy", "message": "The plan is being updated. Try rejecting again."}
     if project is None or pv is None or pv.status != "draft" or project.status != PLAN_STATUS_FOR_REVIEW:
         write_audit(db, actor, "plan.rejection_blocked", "plan_version", pv.id if pv else None,
                     after={"project_id": project_id, "version": version, "run_id": run_id})

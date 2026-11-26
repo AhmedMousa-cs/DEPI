@@ -11,7 +11,7 @@ import json
 import logging
 from typing import Callable
 
-from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware import AgentMiddleware, hook_config
 from langchain_core.messages import AIMessage
 
 from app.tools.plan_tools import Agent4Context, ToolCallRecord
@@ -22,6 +22,16 @@ AuditSink = Callable[[Agent4Context, ToolCallRecord], None]
 
 class AgentBudgetStop(RuntimeError):
     """The run used its token budget; the pipeline keeps whatever was saved and falls back to rules."""
+
+
+class FinishAfterReviewMiddleware(AgentMiddleware):
+    """End once the bundled flow has collected a valid review from the model."""
+
+    @hook_config(can_jump_to=["end"])
+    def before_model(self, state, runtime):
+        if runtime.context.pending_review is not None:
+            return {"jump_to": "end"}
+        return None
 
 
 def total_tokens(messages) -> tuple[int, int]:

@@ -172,6 +172,7 @@ class ScheduleDraftOut(BaseModel):
 
     id: int
     project_id: int
+    plan_version: int | None = None
     run_ids: list[int] = Field(default_factory=list)
     payload: dict
     project_start: date

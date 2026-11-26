@@ -18,7 +18,7 @@ def get_schedule(
     db: Session = Depends(get_db),
     user: User = Depends(require_role("PM")),
 ):
-    """The latest schedule draft (any review state; superseded drafts are history)."""
+    """The open schedule preview or published schedule when there is no open preview."""
     get_project_or_404(db, project_id)
     draft = latest_schedule_draft(db, project_id)
     if draft is None:

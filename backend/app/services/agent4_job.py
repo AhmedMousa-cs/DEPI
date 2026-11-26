@@ -31,8 +31,11 @@ def run_agent4_review(ctx: JobContext, params: dict) -> str:
         plan_version_id, version = pv.id, pv.version
     ctx.heartbeat(progress=10)
 
-    result = agent4_plan.run_agent4(project_id=project_id, plan_version_id=plan_version_id, job_id=ctx.job_id,
-                                    rules_only=bool(params.get("rules_only")))
+    try:
+        result = agent4_plan.run_agent4(project_id=project_id, plan_version_id=plan_version_id, job_id=ctx.job_id,
+                                        rules_only=bool(params.get("rules_only")), require_live=True)
+    except agent4_plan.Agent4ReviewIncomplete as exc:
+        raise PermanentJobError(str(exc)) from exc
     ctx.heartbeat(progress=85)
     with SessionLocal() as db:
         write_audit(db, f"agent:{agent4_plan.AGENT}", "agent4.review_completed", "plan_version", plan_version_id,

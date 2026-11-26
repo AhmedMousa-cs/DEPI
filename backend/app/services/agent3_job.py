@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date
 
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -23,7 +22,7 @@ from app.db.session import SessionLocal
 from app.llm.runner import StructuredRun, run_structured
 from app.schemas.plan import TaskOverride
 from app.schemas.scheduling import EGYPT_CALENDAR
-from app.services.change_schedule import build_schedule_inputs, schedule_constraints
+from app.services.change_schedule import build_schedule_inputs, effective_schedule_start, schedule_constraints
 from app.services.jobs import JobContext, PermanentJobError, register
 from app.services.plan_versions import (
     PendingChangeDraft,
@@ -108,6 +107,14 @@ def run_agent3_schedule(ctx: JobContext, params: dict) -> str:
             raise PermanentJobError(str(exc)) from None
         published = current_approved(db, project_id)
         inputs = load_plan_inputs(db, project_id)
+        baseline = published.snapshot if published is not None else {}
+        task_ids = {task["id"] for task in inputs.tasks}
+        requested = _parse_overrides(params.get("overrides"), task_ids, {m["id"] for m in inputs.members})
+        try:
+            overrides, fixed_dates = schedule_constraints(db, project_id, baseline, task_ids, requested)
+            start = effective_schedule_start(inputs, baseline, params.get("start_date"))
+        except ValueError as exc:
+            raise PermanentJobError(str(exc)) from None
     if inputs.project["status"] not in PLANNABLE_STATUSES:
         raise PermanentJobError(
             f"A plan can't be built while the project is '{inputs.project['status']}'; approve the scope first.")
@@ -117,20 +124,12 @@ def run_agent3_schedule(ctx: JobContext, params: dict) -> str:
         raise PermanentJobError(f"Approved tasks depend on tasks that are not approved: {inputs.dangling[:5]}")
     ctx.heartbeat(progress=10)
 
-    task_ids = {task["id"] for task in inputs.tasks}
-    requested = _parse_overrides(params.get("overrides"), task_ids, {m["id"] for m in inputs.members})
-    baseline = published.snapshot if published is not None else {}
-    overrides, fixed_dates = schedule_constraints(baseline, task_ids, requested)
-    start_raw = params.get("start_date") or inputs.project["start_date"]
-    if fixed_dates and not params.get("start_date") and baseline["project"]["start_date"] == start_raw:
-        start_raw = baseline["schedule"]["project_start"]
     # Every LLM call goes through run_structured (budget, agent_runs, audit, Langfuse). Agent 2
     # always fills estimate_hours, so the estimator stays silent in the normal flow; the adapter
     # is only used for missing estimates and the explanation wording (degrades to the
     # deterministic template on any failure).
     llm = BudgetedLLM(project_id, ctx.job_id)
     try:
-        start = date.fromisoformat(start_raw) if start_raw else date.today()
         tasks, members = build_schedule_inputs(inputs, overrides, fixed_dates)
         output = agent3_schedule.run_agent3(tasks, members, start, calendar=EGYPT_CALENDAR, llm=llm)
     except ValueError as exc:
@@ -152,7 +151,7 @@ def run_agent3_schedule(ctx: JobContext, params: dict) -> str:
         draft = save_schedule_draft(
             db,
             project_id=project_id,
-            payload=output.model_dump(mode="json"),
+            payload=output.model_dump(mode="json") | {"plan_version": pv.version},
             project_start=output.schedule.project_start,
             project_end=output.schedule.project_end,
             total_duration_days=output.schedule.total_duration_days,

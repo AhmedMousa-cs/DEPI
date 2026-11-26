@@ -217,6 +217,22 @@ def test_llm_failure_marks_the_run_failed_and_leaves_the_draft_unreviewed(monkey
         assert pvs.get_version(s, pid, 1).snapshot["review"] is None
 
 
+def test_incomplete_live_job_records_usage_and_leaves_the_draft_unreviewed(monkeypatch):
+    pm, pid, _ = setup()
+    start_job(pm, pid, "agent3.schedule")
+    process_one()
+    model = ScriptedChatModel(script=[tool_msg(("get_open_risks", {})), final_msg()])
+    monkeypatch.setattr("app.llm.langchain_model.get_langchain_model", lambda *a, **k: model)
+    process_one()
+    with SessionLocal() as db:
+        run = db.scalar(select(AgentRun).where(AgentRun.agent == "agent4_plan"))
+        job_row = db.get(Job, run.job_id)
+        assert job_row.status == "failed" and "did not complete its live review" in job_row.error
+        assert run.status == "failed" and run.total_tokens > 0 and run.reserved_tokens == 0
+        assert pvs.get_version(db, pid, 1).snapshot["review"] is None
+    assert not audit_rows("agent4.review_completed")
+
+
 # ------------------------------------------------------------------- DbPlanStore
 def new_draft(pid, **kw):
     _i, snap = build_draft_snapshot(pid, **kw)

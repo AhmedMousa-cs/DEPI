@@ -4,8 +4,7 @@ Everything here is DETERMINISTIC — computed from live data (requirements, task
 team capacity). No LLM. The PM opens one screen and knows what needs attention today:
 which project is slipping, who is overbooked, and which risks to act on.
 
-Integration note: Agent 4 (plan-level risks, teammate branch) produces plan risks; this
-register is portfolio-level and can surface those too once that branch is merged.
+The PM's register includes open risks from published plan versions.
 """
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
@@ -18,13 +17,15 @@ from sqlalchemy.orm import Session
 from app.audit import write_audit
 from app.db.models import (
     CoverageReport,
+    PlanVersion,
     Project,
     Requirement,
-    ScheduleDraft,
+    Risk,
     Task,
     TeamMember,
     UserStory,
 )
+from app.services.scheduling import latest_schedule_draft
 from app.llm.runner import run_structured
 from app.schemas.portfolio import PortfolioChatOutput
 
@@ -77,12 +78,7 @@ def project_card(db: Session, project: Project, today: date) -> dict:
     reqs = list(db.scalars(select(Requirement).where(Requirement.project_id == project.id)))
     stories = list(db.scalars(select(UserStory).where(UserStory.project_id == project.id)))
     tasks = list(db.scalars(select(Task).where(Task.project_id == project.id)))
-    schedule = db.scalar(
-        select(ScheduleDraft)
-        .where(ScheduleDraft.project_id == project.id)
-        .order_by(ScheduleDraft.id.desc())
-        .limit(1)
-    )
+    schedule = latest_schedule_draft(db, project.id)
     approved_reqs = sum(1 for r in reqs if r.status == "approved")
     approved_tasks = [t for t in tasks if t.review_status == "approved"]
     done_tasks = sum(1 for t in approved_tasks if t.status == "done")
@@ -260,6 +256,21 @@ def portfolio_risks(db: Session, user) -> dict:
     projects = _accessible_projects(db, user)
     risks: list[dict] = []
 
+    if user.role == "PM" and projects:
+        project_names = {p.id: p.name for p in projects}
+        published_risks = db.scalars(
+            select(Risk).join(PlanVersion, (PlanVersion.id == Risk.plan_version_id)
+                             & (PlanVersion.project_id == Risk.project_id))
+            .where(Risk.project_id.in_(project_names), Risk.status == "open", PlanVersion.status == "approved")
+            .order_by(Risk.id)
+        )
+        for risk in published_risks:
+            risks.append({
+                "type": "plan", "severity": risk.severity, "project_id": risk.project_id,
+                "project_name": project_names[risk.project_id], "message": risk.title, "risk_id": risk.id,
+                "suggestion": risk.mitigation or "Review the published plan risk with the team.",
+            })
+
     for p in projects:
         card = project_card(db, p, today)
         for reason in card["health_reasons"]:
@@ -339,14 +350,15 @@ def portfolio_risks(db: Session, user) -> dict:
                 "suggestion": "Reassign tasks or extend the window.",
             })
 
-    order = {"high": 0, "medium": 1, "low": 2}
-    risks.sort(key=lambda r: (order.get(r["severity"], 3), r["project_name"]))
+    order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    risks.sort(key=lambda r: (order.get(r["severity"], 4), r["project_name"]))
     counts = defaultdict(int)
     for r in risks:
         counts[r["severity"]] += 1
     return {
         "risks": risks,
-        "summary": {"total": len(risks), "high": counts["high"], "medium": counts["medium"], "low": counts["low"]},
+        "summary": {"total": len(risks), "critical": counts["critical"], "high": counts["high"],
+                    "medium": counts["medium"], "low": counts["low"]},
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 

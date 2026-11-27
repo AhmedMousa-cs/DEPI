@@ -2,13 +2,14 @@
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Callable
 
 from sqlalchemy import func, select, update
 
 from app.audit import write_audit
 from app.config import settings
-from app.db.models import Job
+from app.db.models import AgentRun, Job
 from app.db.session import SessionLocal
 
 log = logging.getLogger("nexus.jobs")
@@ -172,6 +173,18 @@ def recover_stale() -> int:
             else:
                 job.status = "failed"
                 job.finished_at = utcnow()
+            # A killed worker leaves its model calls "running" with a full token
+            # reservation; without this the retry is refused by the per-job budget.
+            for run in db.scalars(
+                select(AgentRun).where(AgentRun.job_id == job.id, AgentRun.status == "running")
+            ).all():
+                run.status, run.error_code = "failed", "worker_lost"
+                run.error, run.finished_at = "worker stopped responding", utcnow()
+                run.reserved_tokens, run.reserved_cost_usd = 0, Decimal(0)
+                write_audit(
+                    db, WORKER_ACTOR, "agent.run.failed", "agent_run", run.id,
+                    after={"job_id": job.id, "error_code": "worker_lost"},
+                )
             write_audit(
                 db, WORKER_ACTOR, "job.recovered", "job", job.id,
                 after={"status": job.status, "attempt": job.attempts},

@@ -1,11 +1,12 @@
 from datetime import timedelta
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
 
 import app.services.job_handlers  # noqa: F401
 from app.config import settings
-from app.db.models import Job
+from app.db.models import AgentRun, Job
 from app.db.session import SessionLocal
 from app.services.jobs import (
     HANDLERS,
@@ -138,6 +139,27 @@ def test_recover_stale_requeues_dead_worker_jobs():
     assert recover_stale() == 1
     job = get_job(jid)
     assert job.status == "queued" and job.attempts == 1
+    assert process_one() is True and get_job(jid).status == "done"
+
+
+def test_recover_stale_releases_orphaned_model_reservations():
+    pid = new_project()
+    jid = add_job(pid)
+    with SessionLocal() as db:
+        claim_next_job(db)
+        db.add(AgentRun(
+            project_id=pid, job_id=jid, agent="agent4", model="test-model", prompt_version="v1",
+            status="running", reserved_tokens=settings.max_tokens_per_job,
+            reserved_cost_usd=Decimal("0.5"),
+        ))
+        db.commit()
+    set_job(jid, heartbeat_at=utcnow() - timedelta(hours=1))
+    assert recover_stale() == 1
+    with SessionLocal() as db:
+        run = db.scalar(select(AgentRun).where(AgentRun.job_id == jid))
+        assert run.status == "failed" and run.error_code == "worker_lost"
+        assert run.reserved_tokens == 0 and run.reserved_cost_usd == Decimal(0)
+    # The retry is not refused by the budget of the killed attempt.
     assert process_one() is True and get_job(jid).status == "done"
 
 
